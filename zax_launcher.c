@@ -13,11 +13,14 @@
  * /SkipMovies is added if it is missing and /Movies is not given.
  * If Zax-Reimpl.dll sits next to it (reimpl/), it is loaded as well; /Original leaves out its
  * replacement functions.
+ * The edition of Zax.exe (edition.h) is shown in the start window's title; a copy-protected Zax.exe (SecuROM)
+ * is not supported and not started.
  * Zax.exe itself is not modified. */
 #include <windows.h>
 #include <commctrl.h>
 #include "mini.h"
 #include "zipdir.h"
+#include "edition.h"
 
 static int fail(const char *what)
 {
@@ -121,6 +124,8 @@ static const char HELP[] =
     "arguments to \"Target\" in its Properties. The launcher window shows the\n"
     "matching command line for the current selection.\n"
     "Zax-Launcher.exe and Zax-Launcher.dll belong in the folder of Zax.exe.\n"
+    "Supported: Zax.exe build 1308 (Zax 1.0) and 1309 (Zax 1.1) without copy\n"
+    "protection; with another Zax.exe the switches stay off.\n"
     "Log: Zax-Launcher.log next to Zax.exe.";
 
 /* Command line without the own program name */
@@ -1077,6 +1082,7 @@ static void create_controls(void)
 }
 
 static int g_start;
+static struct edition g_edition;   /* of the Zax.exe next to the launcher */
 
 static LRESULT CALLBACK wnd_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
 {
@@ -1158,7 +1164,11 @@ static int launcher(void)
     RECT r = {0, 0, 600, 406};  /* with the frame below 640 x 450: a 640 x 480 desktop with its task bar */
     AdjustWindowRect(&r, style, FALSE);
     int w = r.right - r.left, h = r.bottom - r.top;
-    g_wnd = CreateWindowExA(WS_EX_CONTROLPARENT, "Zax-Launcher", "Zax-Launcher", style,
+    char title[96];
+    wsprintfA(title, "Zax-Launcher - %s", g_edition.name);
+    if (g_edition.kind == EDITION_UNKNOWN)
+        lstrcatA(title, ": the switches stay off");
+    g_wnd = CreateWindowExA(WS_EX_CONTROLPARENT, "Zax-Launcher", title, style,
                             (GetSystemMetrics(SM_CXSCREEN) - w) / 2, (GetSystemMetrics(SM_CYSCREEN) - h) / 2,
                             w, h, NULL, NULL, wc.hInstance, NULL);
     if (!g_wnd)
@@ -1186,12 +1196,31 @@ static int launcher(void)
     return g_start ? launch(g_args) : 0;
 }
 
+/* The edition of the Zax.exe next to the launcher (a missing Zax.exe is reported when starting it) */
+static void detect_edition(void)
+{
+    char path[MAX_PATH + 16];
+    exe_dir(path);
+    lstrcatA(path, "Zax.exe");
+    DWORD size = 0;
+    BYTE *image = read_file(path, &size);
+    edition_detect(&g_edition, image, size, 0);
+    if (image)
+        HeapFree(GetProcessHeap(), 0, image);
+}
+
 static int run(void)
 {
     const char *args = own_args();
     if (has_switch(args, "/?") || has_switch(args, "/help") || has_switch(args, "-?") || has_switch(args, "-help")) {
         show_help(NULL);
         return 0;
+    }
+    detect_edition();
+    if (g_edition.kind == EDITION_SECUROM) {
+        MessageBoxA(NULL, "This Zax.exe is copy-protected (SecuROM) and not supported by the launcher.",
+                    "Zax-Launcher", MB_ICONINFORMATION);
+        return 1;
     }
     if (!*args)
         return launcher();

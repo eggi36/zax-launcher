@@ -32,64 +32,68 @@
  * DebugLog: the exe reports loading sections ("Layer Loading", "Start New Game", ...) to
  * 0x4a2650/0x4a2670, which would write to a file that is never opened. The DLL replaces both
  * functions and writes itself, unbuffered, so nothing is lost in a crash.
- * All addresses only apply to the Zax.exe described in docs/EXE_FINDINGS.md; if the bytes at the
- * call sites do not match, the DLL changes nothing.
+ * The addresses are those of build 1308 (docs/EXE_FINDINGS.md); for build 1309 (the Polish exe) CODE() moves the
+ * code from 0x59fc70 on by 0x10 (edition.h). Another Zax.exe (unknown, or copy-protected with SecuROM): the DLL
+ * changes nothing. If the bytes at a patch site do not match, that switch stays off.
  * Log: Zax-Launcher.log next to Zax.exe. */
 #include <windows.h>
 #include <stdarg.h>
 #include "mini.h"
+#include "edition.h"
 
 #define THISCALL __attribute__((thiscall))
 #define STR_(x) #x
 #define STR(x) STR_(x)
 
-/* Zax.exe (image base 0x400000, no ASLR) */
-#define MAINMENU_CTOR   0x5be4a0   /* CMainMenu::CMainMenu(arg), ret 4 */
+/* Zax.exe (image base 0x400000, no ASLR); code addresses of build 1308, moved for the running edition */
+static struct edition g_ed;
+#define CODE(addr) edition_code(&g_ed, (addr))
+#define MAINMENU_CTOR   CODE(0x5be4a0)   /* CMainMenu::CMainMenu(arg), ret 4 */
 #define WORLD           0x6c2080   /* [WORLD] = world object */
 #define GAME            0x713f14   /* [GAME]: target of difficulty and game mode */
 #define DIFF_CATALOG    0x6c2a00   /* catalogue CLevelOfDificulty */
 #define DIFF_COUNT      0x6c2a14
-#define SET_DIFFICULTY  0x5bb780   /* thiscall [[GAME]+0x34c], (Index), ret 4 */
-#define SET_MODE        0x5a3180   /* thiscall [GAME], (char *mode), ret 4 */
-#define PREPARE_START   0x51e450   /* thiscall [[WORLD]+0x334], ret */
-#define CSTRING_CSTR    0x4e13a0   /* thiscall CString*, returns char* */
-#define SET_RETURN_WIN  0x404180   /* thiscall window, (window *), ret 4 */
+#define SET_DIFFICULTY  CODE(0x5bb780)   /* thiscall [[GAME]+0x34c], (Index), ret 4 */
+#define SET_MODE        CODE(0x5a3180)   /* thiscall [GAME], (char *mode), ret 4 */
+#define PREPARE_START   CODE(0x51e450)   /* thiscall [[WORLD]+0x334], ret */
+#define CSTRING_CSTR    CODE(0x4e13a0)   /* thiscall CString*, returns char* */
+#define SET_RETURN_WIN  CODE(0x404180)   /* thiscall window, (window *), ret 4 */
 #define QUEST_MODE      0x6179f0   /* "QuestMode" */
 #define VT_START_GAME   0x13c      /* world: StartNewGame(1, map, start point, 0) */
 #define VT_CLOSE        0x14       /* close a window (deletes the object) */
 #define APP_VT_STEP     0x602dd4   /* application vtable 0x602dc8, slot 3: the step (dt), ret 4 */
-#define APP_STEP        0x59d140   /* CZaxWorld::Frame, the slot's original target */
+#define APP_STEP        CODE(0x59d140)   /* CZaxWorld::Frame, the slot's original target */
 
 /* game menu "Zax Menu" (constructor 0x5bfc40, click handler 0x5bff00) */
-#define MENU_PATCH      0x5bfe14   /* mov ecx,0x138 / call ALLOC: start of "End Game" */
-#define MENU_RESUME     0x5bfe19   /* return address behind mov ecx,0x138 */
-#define MENU_HANDLER_CMP 0x5bffad  /* cmp eax,[esi+0x13c] -> dialog "Select Map" */
+#define MENU_PATCH      CODE(0x5bfe14)   /* mov ecx,0x138 / call ALLOC: start of "End Game" */
+#define MENU_RESUME     CODE(0x5bfe19)   /* return address behind mov ecx,0x138 */
+#define MENU_HANDLER_CMP CODE(0x5bffad)  /* cmp eax,[esi+0x13c] -> dialog "Select Map" */
 #define MENU_LOAD_MAP   0x13c      /* button the handler knows */
-#define ALLOC           0x417710   /* operator new, size in ecx */
+#define ALLOC           CODE(0x417710)   /* operator new, size in ecx */
 #define BUTTON_SIZE     0x138
-#define BUTTON_CTOR     0x40fa60   /* thiscall button, (parent, CString *text, 0), ret 0xc */
-#define ADD_CONTROL     0x40c7c0   /* thiscall window, (button, placement, 0, x, y, 0), ret 0x18 */
+#define BUTTON_CTOR     CODE(0x40fa60)   /* thiscall button, (parent, CString *text, 0), ret 0xc */
+#define ADD_CONTROL     CODE(0x40c7c0)   /* thiscall window, (button, placement, 0, x, y, 0), ret 0x18 */
 #define LABEL_LOAD_MAP  0x7144d4   /* CString "Load &Map (F9)", created in the exe but unused */
 #define VT_LOCAL_PLAYER 0x04       /* world: object for the multiplayer query */
 #define VT_IS_CLIENT    0x34       /* true as multiplayer client: then no "Save Game" either */
 
 /* Cheats */
 #define IAT_DISPATCH    0x5ea234   /* import entry DispatchMessageA, only call 0x599b62 */
-#define GET_PLAYER      0x4f5d80   /* thiscall [GAME], returns the player character or 0 */
+#define GET_PLAYER      CODE(0x4f5d80)   /* thiscall [GAME], returns the player character or 0 */
 
 /* debug log */
-#define SECTION_BEGIN   0x4a2650   /* name in ecx: write "*** name ***", depth + 1 */
-#define SECTION_END     0x4a2670   /* depth - 1, then "section done" or "END of all active section" */
+#define SECTION_BEGIN   CODE(0x4a2650)   /* name in ecx: write "*** name ***", depth + 1 */
+#define SECTION_END     CODE(0x4a2670)   /* depth - 1, then "section done" or "END of all active section" */
 #define SECTION_DEPTH   0x6bdf68   /* depth, not used anywhere else by the exe */
 
 /* frame counter: test eax,eax / setne cl / mov [ebp+0x1b],cl after reading "Show Frame Rate" */
-#define SHOW_FPS_SETNE  0x4cdbf7
+#define SHOW_FPS_SETNE  CODE(0x4cdbf7)
 #define NET_GRAPHS_ON   0x6d00ec   /* byte, read only at 0x520153 (NetTrafficGraph_Update 0x520150) */
-#define NET_GRAPHS_READ 0x520153
+#define NET_GRAPHS_READ CODE(0x520153)
 /* The draw pass Layer_DrawPass 0x4e8900: its loop over the parts after drawing, slot 30 of each with the frame
  * (edi) pushed; nothing in the exe writes its debug bytes */
-#define DRAW_PASS_LOOP  0x4e8b31   /* mov ecx,[esp+0x58]; push edi; mov edx,[ecx+4]; mov ecx,[edx+esi*4] */
-#define DRAW_PASS_SLOT  0x4e8b3c   /* mov eax,[ecx]; call [eax+0x78]: the part's slot 30 (frame), ret 4 */
+#define DRAW_PASS_LOOP  CODE(0x4e8b31)   /* mov ecx,[esp+0x58]; push edi; mov edx,[ecx+4]; mov ecx,[edx+esi*4] */
+#define DRAW_PASS_SLOT  CODE(0x4e8b3c)   /* mov eax,[ecx]; call [eax+0x78]: the part's slot 30 (frame), ret 4 */
 #define MINI_MAP_RENDER 0x6c2908   /* byte: set while the layer render draws the mini map (0x4f4ae0) */
 #define SHOW_HIDDEN     0x6c1cf5
 #define ALT_DIRTY_DRAW  0x6c1cf7
@@ -270,7 +274,7 @@ static void run_cheat(int i)
         return;
     }
     log_line("Cheat %s", CHEATS[i].name);
-    ((void (*)(void))CHEATS[i].routine)();
+    ((void (*)(void))CODE(CHEATS[i].routine))();
 }
 
 /* Replacement for DispatchMessageA: catch Ctrl+F keys, pass everything else on as usual. */
@@ -291,7 +295,7 @@ static void install_cheats(void)
 {
     for (size_t i = 0; i < sizeof CHEATS / sizeof *CHEATS; i++)
         for (int k = 0; k < 6; k++)
-            if (((BYTE *)CHEATS[i].routine)[k] != CHEATS[i].head[k]) {
+            if (((BYTE *)CODE(CHEATS[i].routine))[k] != CHEATS[i].head[k]) {
                 log_line("Cheat %s does not match, different Zax.exe? Cheats stay off.", CHEATS[i].name);
                 return;
             }
@@ -430,7 +434,7 @@ static int draw_pass_matches(void)
  * 0x400000. Then AI_Draw for each AI of the part itself (+0x3c data, +0x40 count): the triggers', spawn points',
  * patrols' and ambient sounds' AIs sit there, and no slot 29 draws them (the developers' loop over them is not in
  * the release; docs/EXE_FINDINGS.md, "Debug drawing of the AIs and parts") */
-#define AI_DRAW         0x4fd0b0   /* thiscall AI, (part, frame), ret 8 */
+#define AI_DRAW         CODE(0x4fd0b0)   /* thiscall AI, (part, frame), ret 8 */
 #define PART_AIS        0x3c       /* the part's AI array: data, count at +0x40 */
 typedef void (THISCALL *slot_fn)(void *self, void *frame);
 typedef void (THISCALL *ai_draw_fn)(void *ai, void *part, void *frame);
@@ -524,6 +528,7 @@ void __cdecl add_load_map(void *menu)
 }
 
 /* Jump target at MENU_PATCH: esi = menu; afterwards execute the overwritten instruction. */
+DWORD g_menu_resume;   /* MENU_RESUME of this edition */
 void menu_hook(void);
 __asm__(".globl _menu_hook\n"
         "_menu_hook:\n"
@@ -533,7 +538,7 @@ __asm__(".globl _menu_hook\n"
         "  addl $4, %esp\n"
         "  popal\n"
         "  movl $" STR(BUTTON_SIZE) ", %ecx\n"
-        "  pushl $" STR(MENU_RESUME) "\n"
+        "  pushl _g_menu_resume\n"
         "  ret\n");
 
 static void install_load_map(void)
@@ -550,6 +555,7 @@ static void install_load_map(void)
         log_line("Game menu does not match, different Zax.exe? Load Map stays off.");
         return;
     }
+    g_menu_resume = MENU_RESUME;
     DWORD old;
     VirtualProtect(site, 5, PAGE_EXECUTE_READWRITE, &old);
     site[0] = 0xe9;
@@ -563,14 +569,14 @@ static void install(void)
 {
     BYTE *hook = (BYTE *)main_menu_ctor;
     for (size_t i = 0; i < sizeof CALL_SITES / sizeof *CALL_SITES; i++) {
-        BYTE *site = (BYTE *)CALL_SITES[i];
+        BYTE *site = (BYTE *)CODE(CALL_SITES[i]);
         if (site[0] != 0xe8 || (DWORD)(site + 5) + *(INT32 *)(site + 1) != MAINMENU_CTOR) {
             log_line("Call site %08lX does not match, different Zax.exe? No changes.", (DWORD)site);
             return;
         }
     }
     for (size_t i = 0; i < sizeof CALL_SITES / sizeof *CALL_SITES; i++) {
-        BYTE *site = (BYTE *)CALL_SITES[i];
+        BYTE *site = (BYTE *)CODE(CALL_SITES[i]);
         DWORD old;
         VirtualProtect(site, 5, PAGE_EXECUTE_READWRITE, &old);
         *(INT32 *)(site + 1) = (INT32)(hook - (site + 5));
@@ -593,6 +599,17 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
 
     const char *cmd = GetCommandLineA();
     log_line("Command line: %s", cmd);
+    /* the image as loaded, before Zax.exe has run a single instruction */
+    edition_detect(&g_ed, (const BYTE *)GetModuleHandleA(NULL), 0, 1);
+    log_line("Zax.exe: %s", g_ed.name);
+    if (g_ed.kind == EDITION_SECUROM) {
+        log_line("This Zax.exe is copy-protected (SecuROM) and not supported by the launcher. No changes.");
+        return TRUE;
+    }
+    if (g_ed.kind != EDITION_1308 && g_ed.kind != EDITION_1309) {
+        log_line("Not a Zax.exe the launcher knows (supported: build 1308 and 1309 without copy protection). No changes.");
+        return TRUE;
+    }
     if (has_switch(cmd, "/NoLoadMap"))
         log_line("Game menu: Load Map button disabled (/NoLoadMap)");
     else

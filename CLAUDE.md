@@ -1,6 +1,6 @@
 # zax-launcher – project context for Claude Code
 
-Zax-Launcher.exe and Zax-Launcher.dll: the classic launcher of the ORIGINAL Zax.exe of "Zax: The Alien Hunter" (German noCD build 1308; every address refers to it). Direct start into a map, the "Load Map" button, the debug switches; works alone with the original Zax.exe (no option may need Zax-Reimpl) and knows nothing of the port (zax-redone has its own launcher, `portlauncher/`, with copies of `mini.h` and `zipdir.h`).
+Zax-Launcher.exe and Zax-Launcher.dll: the classic launcher of the ORIGINAL Zax.exe of "Zax: The Alien Hunter". Every address in the code is one of build 1308 (the German exe); `edition.h` recognises the edition (1308, 1309 = Polish, SecuROM, unknown) and maps code addresses for 1309 (`CODE()`: from `0x59fc70` on +0x10, data unchanged; each address of the DLL verified against the Polish exe on 2026-11-07). SecuROM editions are only recognised and refused (a message, nothing patched, not started): no circumvention of the copy protection, nor hints at one, ever goes into this repository. Direct start into a map, the "Load Map" button, the debug switches; works alone with the original Zax.exe (no option may need Zax-Reimpl) and knows nothing of the port (zax-redone has its own launcher, `portlauncher/`, with copies of `mini.h` and `zipdir.h`).
 
 Talk to the user in **German**. Everything else – code, identifiers, file names, comments, log output, documentation – is **English**.
 
@@ -15,6 +15,7 @@ build.sh           builds Zax-Launcher.exe and .dll with zig (default output out
 make_icon.py       the icon of Zax.exe as .ico (pefile, Pillow; never committed)
 zax_launcher.c     the exe: start window, help, command line, starts Zax.exe with the DLL
 zax_launcher_dll.c the DLL: patches the running Zax.exe (direct start, Load Map, debug switches)
+edition.h          which Zax.exe it is (build, SecuROM) and the 1309 code shift; used by the exe and the DLL
 mini.h             the few C library functions without a C runtime
 zipdir.h           the directory of Data.dat (a zip) for the map list, without Windows calls
 tools/git-hooks/   pre-push
