@@ -1,0 +1,14 @@
+# build output (Zax-Launcher.exe, Zax-Launcher.dll) and the icon made from the user's Zax.exe
+out/
+*.ico
+*.exe
+*.EXE
+*.dll
+__pycache__/
+*.pyc
+.venv
+.DS_Store
+# the game data of every edition (copyrighted)
+gamedata
+Data/
+Data.dat
