@@ -1,7 +1,7 @@
 /* Zax-Launcher.exe: starts Zax.exe from the same folder with Zax-Launcher.dll.
  *
  *   Zax-Launcher.exe [/Map "Act 1/M1M2/01 Main" [/Spawn "Game Start"] [/Difficulty Normal]]
- *                 [/NoLoadMap] [/Movies] [/Cheats] [/DebugLog] [/ShowFPS] [/NetGraphs] [/DebugDraw] [/ShowHidden]
+ *                 [/LoadMap] [/SkipMovies] [/Cheats] [/DebugLog] [/ShowFPS] [/NetGraphs] [/DebugDraw] [/ShowHidden]
  *                 [/DrawOutlines] [/AltDirtyDraw] [/NoEntryDraw] [/Original] [/Resolution 1024x768]
  *                 [-host | -connect <address>] [-name <player>]
  *
@@ -9,8 +9,8 @@
  * point, difficulty, resolution (only 640 x 480 or 800 x 600, 8 or 16 bit), switches and a LAN game
  * (the exe's own -host / -connect / -name); the selection is remembered in Zax-Launcher.ini next to the exe.
  * /? or /help shows the help in a scrollable window; in the start window every control has a tooltip.
- * All arguments are passed to Zax.exe unchanged (e.g. /ScreenWidth 800);
- * /SkipMovies is added if it is missing and /Movies is not given.
+ * All arguments are passed to Zax.exe unchanged (e.g. /ScreenWidth 800, /SkipMovies), nothing is added: without
+ * switches the game starts as without the launcher (movies, main menu, no "Load Map" button).
  * If Zax-Reimpl.dll sits next to it (reimpl/), it is loaded as well; /Original leaves out its
  * replacement functions.
  * The edition of Zax.exe (edition.h) is shown in the start window's title; a copy-protected Zax.exe (SecuROM)
@@ -35,8 +35,9 @@ static const char HELP[] =
     "Zax-Launcher starts Zax.exe from the same folder and adds\n"
     "- starting directly into a map (no main menu, no intro),\n"
     "- the \"Load Map\" button in the game menu (Esc), which loads any map under Levels,\n"
-    "- optionally the developer cheats that are still in Zax.exe.\n"
-    "Zax.exe itself is not modified.\n\n"
+    "- the developer cheats and switches that are still in Zax.exe.\n"
+    "Each is off unless its switch is given; without switches the game starts as\n"
+    "usual (movies, main menu). Zax.exe itself is not modified.\n\n"
     "Without arguments a launcher window opens. With arguments the game starts\n"
     "right away:\n"
     "  Zax-Launcher.exe [/Map \"map\"] [/Spawn \"spawn point\"] [/Difficulty level]\n\n"
@@ -49,10 +50,10 @@ static const char HELP[] =
     "    First Map Spawn Point from Rules.txt, which the map must then contain.\n"
     "/Difficulty Normal\n"
     "    Difficulty: Easy, Normal or Hard. Default Normal.\n"
-    "/NoLoadMap\n"
-    "    no \"Load Map\" button in the game menu.\n"
-    "/Movies\n"
-    "    show the movies (otherwise /SkipMovies is added).\n"
+    "/LoadMap\n"
+    "    the \"Load Map\" button in the game menu (Esc).\n"
+    "/SkipMovies\n"
+    "    Zax.exe's own switch: no movies at the start.\n"
     "/Cheats\n"
     "    enables the cheats in the game (hold Ctrl):\n"
     "    F1 giveall: every item     F2 loadup: weapons, ammo, keys\n"
@@ -208,8 +209,6 @@ static int launch(const char *args)
     lstrcatA(cmd, exe);
     lstrcatA(cmd, "\" ");
     lstrcatA(cmd, args);
-    if (!str_find(args, "/SkipMovies") && !has_switch(args, "/Movies"))
-        lstrcatA(cmd, " /SkipMovies");
 
     /* /Resolution: the size for this start only (the exe's /ScreenWidth and /ScreenHeight, which it does
      * not write to Zax.CFG); other sizes than the exe's two only with Zax-Reimpl.dll and its ExtraModes */
@@ -769,10 +768,10 @@ static void build_args(void)
         wsprintfA(buf, "/ScreenBitDepth %d", depth);
         add_arg("%s", buf);
     }
-    if (!checked(ID_LOADMAP))
-        add_arg("%s", "/NoLoadMap");
-    if (!checked(ID_SKIP))
-        add_arg("%s", "/Movies");
+    if (checked(ID_LOADMAP))
+        add_arg("%s", "/LoadMap");
+    if (checked(ID_SKIP))
+        add_arg("%s", "/SkipMovies");
     if (checked(ID_CHEATS))
         add_arg("%s", "/Cheats");
     if (checked(ID_DEBUGLOG))
@@ -916,7 +915,7 @@ static const struct {
     {ID_RES, "Screen size for this start only (Zax.CFG stays as it is). The game runs at 640 x 480 or 800 x 600."},
     {ID_DEPTH, "Color depth for this start only. At 24 or 32 bit the game stops before the level (the data has no 24/32-bit images), so only 8 and "
                "16 bit are offered."},
-    {ID_SKIP, "Skips the intro movies (/SkipMovies). Off: /Movies."},
+    {ID_SKIP, "Skips the movies at the start (/SkipMovies, a switch of Zax.exe)."},
     {ID_LOADMAP, "Adds a \"Load Map\" button to the game menu (Esc) that loads any map under Levels."},
     {ID_CHEATS, "The developer cheats still in Zax.exe, hold Ctrl: F1 every item, F2 weapons/ammo/keys, F3 ore and "
                 "crystals, F4 Twin Disruptor, F5 battery charges, F6 mines, F7 full health, F8 unjam the weapon, "
@@ -993,7 +992,7 @@ static void create_controls(void)
     add(0, "COMBOBOX", "", WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST, 336, 154, 240, 300, ID_RES);
     add(0, "STATIC", "Color depth:", 0, 336, 184, 240, 16, -1);
     add(0, "COMBOBOX", "", WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST, 336, 202, 240, 200, ID_DEPTH);
-    add(0, "BUTTON", "Skip intro movies", WS_TABSTOP | BS_AUTOCHECKBOX, 336, 238, 240, 18, ID_SKIP);
+    add(0, "BUTTON", "Skip start movies", WS_TABSTOP | BS_AUTOCHECKBOX, 336, 238, 240, 18, ID_SKIP);
     add(0, "BUTTON", "\x93Load Map\x94 button in game menu (Esc)", WS_TABSTOP | BS_AUTOCHECKBOX,
         336, 260, 240, 18, ID_LOADMAP);
 
@@ -1049,8 +1048,8 @@ static void create_controls(void)
         if (!lstrcmpiA(diff, DIFFICULTY[i]))
             d = i;
     SendMessageA(item(ID_EASY + d), BM_SETCHECK, BST_CHECKED, 0);
-    SendMessageA(item(ID_SKIP), BM_SETCHECK, ini_int("SkipMovies", 1) ? BST_CHECKED : BST_UNCHECKED, 0);
-    SendMessageA(item(ID_LOADMAP), BM_SETCHECK, ini_int("LoadMap", 1) ? BST_CHECKED : BST_UNCHECKED, 0);
+    SendMessageA(item(ID_SKIP), BM_SETCHECK, ini_int("SkipMovies", 0) ? BST_CHECKED : BST_UNCHECKED, 0);
+    SendMessageA(item(ID_LOADMAP), BM_SETCHECK, ini_int("LoadMap", 0) ? BST_CHECKED : BST_UNCHECKED, 0);
     SendMessageA(item(ID_CHEATS), BM_SETCHECK, ini_int("Cheats", 0) ? BST_CHECKED : BST_UNCHECKED, 0);
     SendMessageA(item(ID_DEBUGLOG), BM_SETCHECK, ini_int("DebugLog", 0) ? BST_CHECKED : BST_UNCHECKED, 0);
     SendMessageA(item(ID_SHOWFPS), BM_SETCHECK, ini_int("ShowFPS", 0) ? BST_CHECKED : BST_UNCHECKED, 0);

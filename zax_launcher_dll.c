@@ -5,7 +5,7 @@
  *   /Map "Act 1/M1M2/01 Main"   map (path below Levels/ without extension); without /Map normal start
  *   /Spawn "Game Start"         start point; default First Map Spawn Point from Rules.txt
  *   /Difficulty Normal          name of a file in Resources/Dificulty Types; default Normal
- *   /NoLoadMap                  no "Load Map" button in the game menu
+ *   /LoadMap                    the "Load Map" button in the game menu
  *   /Cheats                     put the exe's cheat routines on Ctrl+F1 ... Ctrl+F9
  *   /DebugLog                   write the exe's section log to Zax-Debug.log
  *   /ShowFPS                    turn on the exe's frame counter (like Show Frame Rate=1 in Zax.CFG)
@@ -610,9 +610,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
         log_line("Not a Zax.exe the launcher knows (supported: build 1308 and 1309 without copy protection). No changes.");
         return TRUE;
     }
-    if (has_switch(cmd, "/NoLoadMap"))
-        log_line("Game menu: Load Map button disabled (/NoLoadMap)");
-    else
+    if (has_switch(cmd, "/LoadMap"))
         install_load_map();
     if (has_switch(cmd, "/Cheats"))
         install_cheats();
