@@ -23,3 +23,7 @@ The icon is taken from your own Zax.exe at build time (`ZAX_EXE`, else the Zax.e
 ## Install
 
 Copy `Zax-Launcher.exe` and `Zax-Launcher.dll` next to `Zax.exe` of an installed game and start `Zax-Launcher.exe`.
+
+## Licence
+
+MIT (`LICENSE`). This licence covers only the project's own code and documentation. It grants no right to "Zax: The Alien Hunter" itself: the game, its executable, data, texts, names and artwork belong to their rights holders, are not included, and every player brings them from their own copy.
