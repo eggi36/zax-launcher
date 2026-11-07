@@ -13,6 +13,15 @@ Zax-Launcher.exe, a launcher for the original Zax.exe of "Zax: The Alien Hunter"
 - Everything is off by default: without switches the game starts as without the launcher (start movies, main menu, no "Load Map" button); `/SkipMovies` is Zax.exe's own switch and is passed on like every other argument.
 - Without arguments a start window opens (map, start point, difficulty, resolution, switches, LAN game); `/?` or `/help` shows the help.
 
+| | |
+|---|---|
+| ![The start window: map, start point, difficulty, resolution](docs/images/launcher-start.png) | ![The Developer page with the developer switches still in Zax.exe](docs/images/launcher-developer.png) |
+| The start window (`Zax-Launcher.exe` without arguments) | Its Developer page: the developer switches still in Zax.exe |
+
+![The game menu (Esc) with the "Load Map" button](docs/images/launcher-game-menu.png)
+
+*The game menu (Esc) with the launcher's "Load Map" button (`/LoadMap`).*
+
 The launcher works with the original Zax.exe alone. It knows nothing of the port: the decompilation (zax-decomp) and the port (zax-redone) are separate repositories; if the decompilation's `Zax-Reimpl.dll` sits next to Zax.exe, the launcher loads it as well (`/Original` leaves out its replacement functions). How each switch works in the exe, with addresses and evidence: zax-decomp's `docs/EXE_FINDINGS.md` and `docs/DECOMPILATION.md`.
 
 ## Supported editions
