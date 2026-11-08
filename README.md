@@ -22,7 +22,7 @@ Zax-Launcher.exe, a launcher for the original Zax.exe of "Zax: The Alien Hunter"
 
 *The game menu (Esc) with the launcher's "Load Map" button (`/LoadMap`).*
 
-The launcher works with the original Zax.exe alone. It knows nothing of the port: the decompilation (zax-decomp) and the port (zax-redone) are separate repositories; if the decompilation's `Zax-Reimpl.dll` sits next to Zax.exe, the launcher loads it as well (`/Original` leaves out its replacement functions). How each switch works in the exe, with addresses and evidence: zax-decomp's `docs/EXE_FINDINGS.md` and `docs/DECOMPILATION.md`.
+The launcher works with the original Zax.exe alone. The decompilation (zax-decomp) is a separate repository; if the decompilation's `Zax-Reimpl.dll` sits next to Zax.exe, the launcher loads it as well (`/Original` leaves out its replacement functions). How each switch works in the exe, with addresses and evidence: zax-decomp's `docs/EXE_FINDINGS.md` and `docs/DECOMPILATION.md`.
 
 ## Supported editions
 
