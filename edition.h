@@ -6,8 +6,10 @@
  *     the demo of 2001-08-06; their code is the same byte for byte (apart from the GameSpy port).
  *   build 1309 ("Zax 1.1") without copy protection: the Polish exe. Its code from 0x59fc70 on lies 0x10 higher
  *     than in 1308 (calls into it, vtable slots, jump tables); every other address, all data, is the same.
- * Recognised but not supported: the editions whose entry point lies in the section .cms_t (SecuROM; the English
- * original 1308, the Spanish 1309). The launcher patches nothing in them and does not start them.
+ * Recognised but not supported: the editions whose entry point lies in the section .cms_t (SecuROM; the German
+ * CD's build 1305, the English original 1308, the Spanish and the French 1309). The launcher patches nothing in
+ * them and does not start them. Build 1305 keeps its build number at 0x5907b0 (BUILD_FUNC_1305); the Spanish and
+ * the French 1309 differ only in the loader, so their entry point names them.
  * Anything else (other builds, the older demos, the Chinese 1314) is unknown: nothing is patched. */
 #pragma once
 #include <windows.h>
@@ -25,6 +27,7 @@ struct edition {
 #define SHIFT_FROM  0x59fc70   /* the first function that lies 0x10 higher in 1309 */
 #define SHIFT_END   0x5e9c80   /* the free bytes at the end of .text (Polish 1309: its new strings) */
 #define BUILD_FUNC  0x5908a0   /* mov eax, build; ret */
+#define BUILD_FUNC_1305 0x5907b0  /* the same in build 1305, whose code lies elsewhere */
 #define VERSION_TXT 0x623660   /* "1.0" / "1.1" */
 #define ENTRY_1308  0x1d328f   /* entry point (RVA) of the unprotected 1308; 1309: + 0x10 */
 #define MENU_CALL   0x50eab7   /* call CMainMenu::CMainMenu 0x5be4a0 (1309: 0x5be4b0), from below the shift */
@@ -95,7 +98,11 @@ static void edition_detect(struct edition *ed, const BYTE *base, DWORD size, int
     /* build number and version text, the same in every edition of 1308 and 1309 */
     const BYTE *f = pe_at(&pe, BUILD_FUNC, 6), *v = pe_at(&pe, VERSION_TXT, 4);
     int build = f && f[0] == 0xb8 && f[3] == 0 && f[4] == 0 && f[5] == 0xc3 ? f[1] | f[2] << 8 : 0;
-    const char *version = build == 1308 ? "1.0" : build == 1309 ? "1.1" : NULL;
+    if (build != 1308 && build != 1309) {
+        f = pe_at(&pe, BUILD_FUNC_1305, 6);
+        build = f && f[0] == 0xb8 && f[1] == 0x19 && f[2] == 0x05 && f[3] == 0 && f[4] == 0 && f[5] == 0xc3 ? 1305 : 0;
+    }
+    const char *version = build == 1305 || build == 1308 ? "1.0" : build == 1309 ? "1.1" : NULL;
     if (!version || !v || v[0] != version[0] || v[1] != version[1] || v[2] != version[2] || v[3])
         return;
     ed->build = build;
@@ -111,9 +118,16 @@ static void edition_detect(struct edition *ed, const BYTE *base, DWORD size, int
             named &= s->Name[k] == cms_t[k];
         if (named && entry >= s->VirtualAddress && entry < s->VirtualAddress + s->Misc.VirtualSize) {
             ed->kind = EDITION_SECUROM;
-            lstrcatA(ed->name, " (SecuROM)");
+            lstrcatA(ed->name, build == 1305 ? " (German CD, SecuROM)"
+                               : build == 1309 && entry == 0x325fdc ? " (Spanish, SecuROM)"
+                               : build == 1309 && entry == 0x3255cc ? " (French, SecuROM)" : " (SecuROM)");
             return;
         }
+    }
+    if (build == 1305) {   /* only known with SecuROM */
+        lstrcatA(ed->name, " (unknown variant)");
+        ed->build = 0;
+        return;
     }
 
     /* the code layout: entry point and a call from below the shift into it */
