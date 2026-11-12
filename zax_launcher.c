@@ -1217,8 +1217,9 @@ static int run(void)
     }
     detect_edition();
     if (g_edition.kind == EDITION_SECUROM) {
-        MessageBoxA(NULL, "This Zax.exe is copy-protected (SecuROM) and not supported by the launcher.",
-                    "Zax-Launcher", MB_ICONINFORMATION);
+        char text[160];
+        wsprintfA(text, "This Zax.exe (%s) is copy-protected and not supported by the launcher.", g_edition.name);
+        MessageBoxA(NULL, text, "Zax-Launcher", MB_ICONINFORMATION);
         return 1;
     }
     if (!*args)

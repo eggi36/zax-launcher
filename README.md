@@ -32,7 +32,7 @@ The launcher reads the build of the Zax.exe next to it and shows it in the start
 |---|---|---|
 | Build 1308 without copy protection (German, Russian, the English no-CD exe, the exe of the demo of 2001-08-06) | Zax 1.0 Build 1308 | everything |
 | Build 1309 without copy protection (Polish) | Zax 1.1 Build 1309 (Polish) | everything |
-| Copy-protected with SecuROM (the English original 1308, the Spanish 1309) | … (SecuROM) | not supported: the launcher shows a message and does not start it |
+| Copy-protected with SecuROM (the German CD's build 1305, the English original 1308, the Spanish and the French 1309) | … (German CD, SecuROM), … (SecuROM), … (Spanish, SecuROM), … (French, SecuROM) | not supported: the launcher shows a message and does not start it |
 | Any other (the older demos, the Chinese 1314, …) | unknown Zax.exe | the game starts, but none of the launcher's switches work |
 
 The addresses the launcher patches are those of build 1308; in build 1309 the code from `0x59fc70` on lies 0x10 higher, everything else is the same (zax-decomp's `docs/EXE_FINDINGS.md`, "Build 1308 → 1309"). Before each patch the launcher checks the original bytes and leaves that switch off if they do not match.
