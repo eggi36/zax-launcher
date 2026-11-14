@@ -4,8 +4,8 @@ Zax-Launcher.exe, a launcher for the original Zax.exe of "Zax: The Alien Hunter"
 
     Zax-Launcher.exe [/Map "Act 1/M1M2/01 Main" [/Spawn "Game Start"] [/Difficulty Normal]]
                      [/LoadMap] [/SkipMovies] [/Cheats] [/DebugLog] [/ShowFPS] [/NetGraphs] [/DebugDraw] [/ShowHidden]
-                     [/DrawOutlines] [/AltDirtyDraw] [/NoEntryDraw] [/Original] [/Resolution 1024x768]
-                     [-host | -connect <address>] [-name <player>]
+                     [/DrawOutlines] [/AltDirtyDraw] [/NoEntryDraw] [-host | -connect <address>] [-name <player>]
+                     [/LoadDll Name.dll]
 
 - Start directly into a map (no main menu, no intro), at a start point and difficulty of your choice.
 - A "Load Map" button in the game menu (Esc) that loads any map under `Levels` (`/LoadMap`).
@@ -22,7 +22,7 @@ Zax-Launcher.exe, a launcher for the original Zax.exe of "Zax: The Alien Hunter"
 
 *The game menu (Esc) with the launcher's "Load Map" button (`/LoadMap`).*
 
-The launcher works with the original Zax.exe alone. The decompilation (zax-decomp) is a separate repository; if the decompilation's `Zax-Reimpl.dll` sits next to Zax.exe, the launcher loads it as well (`/Original` leaves out its replacement functions). How each switch works in the exe, with addresses and evidence: zax-decomp's `docs/EXE_FINDINGS.md` and `docs/DECOMPILATION.md`.
+The launcher works with the original Zax.exe alone and loads no DLL into it but its own, whatever lies in the game folder. For developers, `/LoadDll Name.dll` (repeatable, at most 4) also loads a DLL that lies next to Zax.exe, after Zax-Launcher.dll; it is the only switch the launcher takes out of the command line, so Zax.exe gets the same command line as without it. The decompilation (zax-decomp) is a separate repository; its test tools load its `Zax-Reimpl.dll` this way. How each switch works in the exe, with addresses and evidence: zax-decomp's `docs/EXE_FINDINGS.md` and `docs/DECOMPILATION.md`.
 
 ## Supported editions
 

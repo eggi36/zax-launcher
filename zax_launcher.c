@@ -2,8 +2,8 @@
  *
  *   Zax-Launcher.exe [/Map "Act 1/M1M2/01 Main" [/Spawn "Game Start"] [/Difficulty Normal]]
  *                 [/LoadMap] [/SkipMovies] [/Cheats] [/DebugLog] [/ShowFPS] [/NetGraphs] [/DebugDraw] [/ShowHidden]
- *                 [/DrawOutlines] [/AltDirtyDraw] [/NoEntryDraw] [/Original] [/Resolution 1024x768]
- *                 [-host | -connect <address>] [-name <player>]
+ *                 [/DrawOutlines] [/AltDirtyDraw] [/NoEntryDraw] [-host | -connect <address>] [-name <player>]
+ *                 [/LoadDll Name.dll]
  *
  * Without arguments a start window appears: choose map (from Data\Levels and from Data.dat), start
  * point, difficulty, resolution (only 640 x 480 or 800 x 600, 8 or 16 bit), switches and a LAN game
@@ -11,8 +11,8 @@
  * /? or /help shows the help in a scrollable window; in the start window every control has a tooltip.
  * All arguments are passed to Zax.exe unchanged (e.g. /ScreenWidth 800, /SkipMovies), nothing is added: without
  * switches the game starts as without the launcher (movies, main menu, no "Load Map" button).
- * If Zax-Reimpl.dll sits next to it (reimpl/), it is loaded as well; /Original leaves out its
- * replacement functions.
+ * The launcher loads no DLL into Zax.exe but its own, whatever lies in the folder; only /LoadDll Name.dll (a file
+ * next to Zax.exe, for developers) loads another one after it, and that switch is the only argument not passed on.
  * The edition of Zax.exe (edition.h) is shown in the start window's title; a copy-protected Zax.exe (SecuROM)
  * is not supported and not started.
  * Zax.exe itself is not modified. */
@@ -92,16 +92,6 @@ static const char HELP[] =
     "/NoEntryDraw\n"
     "    a leftover mode of redrawing the changed tiles without the objects\n"
     "    on them (technical; objects may vanish).\n"
-    "/Original\n"
-    "    if Zax-Reimpl.dll lies next to Zax.exe: run the original functions\n"
-    "    instead of the reimplemented ones (log in Zax-Reimpl.log).\n"
-    "/Resolution 1024x768\n"
-    "    experiment (docs/DECOMPILATION.md, \"Higher resolutions\"): starts at\n"
-    "    that size (as /ScreenWidth and /ScreenHeight, Zax.CFG stays as it is)\n"
-    "    and lets Zax-Reimpl.dll accept the mode (ZAX_REIMPL_EXTRA_MODES; same\n"
-    "    as ExtraModes= in Zax-Reimpl.ini). Sizes other than 640x480 and 800x600\n"
-    "    need Zax-Reimpl.dll; the menus and the HUD are still laid out for\n"
-    "    800 x 600.\n"
     "-host\n"
     "    LAN game (Zax.exe's own switch): opens the host options window,\n"
     "    where you pick the map and start the game. Multiplayer always runs\n"
@@ -111,6 +101,11 @@ static const char HELP[] =
     "-name \"Player\"\n"
     "    the player name for -host or -connect (otherwise the one of the\n"
     "    multiplayer options).\n"
+    "/LoadDll Name.dll\n"
+    "    for developers: also loads that DLL from the folder of Zax.exe into\n"
+    "    Zax.exe, after Zax-Launcher.dll (repeatable, at most 4). Without it the\n"
+    "    launcher loads no other DLL, whatever lies in the folder. The switch\n"
+    "    and its value are not passed to Zax.exe.\n"
     "/? or /help\n"
     "    shows this help.\n\n"
     "All other arguments are passed to Zax.exe unchanged, e.g.\n"
@@ -168,31 +163,66 @@ static int inject(HANDLE process, const char *dll)
     return loaded != 0;
 }
 
-/* /Resolution WxH: the size, 0 without the switch, -1 when its value is not WxH */
-static int resolution(const char *args, int *w, int *h)
+/* /LoadDll Name.dll: the DLLs a developer asks for (plain file names next to Zax.exe, ending in .dll) into names,
+ * and args without the switches and their values (and the blanks before them) into rest, so Zax.exe gets the same
+ * command line as without them. The number of DLLs, -1 with a message for a bad value. */
+enum { LOAD_DLL_MAX = 4 };
+
+static int take_load_dlls(const char *args, char *rest, int rest_size, char names[LOAD_DLL_MAX][MAX_PATH])
 {
-    const char *p = args;
-    for (; (p = str_find(p, "/Resolution")) != NULL; p++)
-        if ((p == args || p[-1] == ' ' || p[-1] == '\t') && (p[11] == ' ' || p[11] == '\t'))
-            break;
-    if (!p)
-        return 0;
-    p += 11;
-    while (*p == ' ' || *p == '\t')
-        p++;
-    *w = *h = 0;
-    while (*p >= '0' && *p <= '9')
-        *w = *w * 10 + (*p++ - '0');
-    if (*p != 'x' && *p != 'X')
-        return -1;
-    for (p++; *p >= '0' && *p <= '9'; p++)
-        *h = *h * 10 + (*p - '0');
-    return *w >= 320 && *w <= 4096 && *h >= 200 && *h <= 4096 ? 1 : -1;
+    int count = 0, len = 0;
+    const char *from = args, *prev_end = NULL, *e;
+    rest[0] = 0;
+    for (const char *t = next_token(args, &e); t; t = next_token(e, &e)) {
+        if (!token_is(t, e, "/LoadDll")) {
+            prev_end = e;
+            continue;
+        }
+        const char *v = next_token(e, &e);
+        char name[MAX_PATH];
+        int n = 0, bad = !v;
+        for (; v && v < e; v++) {
+            if (*v == '"')
+                continue;
+            if (*v == '\\' || *v == '/' || *v == ':' || n + 1 >= (int)sizeof name)
+                bad = 1;
+            else
+                name[n++] = *v;
+        }
+        name[n] = 0;
+        if (bad || n < 5 || str_nieq(name + n - 4, ".dll", 4) != 0 || token_is(name, name + n, "Zax-Launcher.dll") ||
+            count == LOAD_DLL_MAX) {
+            SetLastError(0);
+            fail("/LoadDll needs the name of a DLL next to Zax.exe, e.g. /LoadDll Name.dll (at most 4)");
+            return -1;
+        }
+        lstrcpyA(names[count++], name);
+        /* cut from the end of the token before (or, at the start, up to the next token) to the end of the value */
+        const char *cut = prev_end ? prev_end : t;
+        if (from < cut) {
+            if (len + (cut - from) >= rest_size)
+                return SetLastError(0), fail("Command line too long"), -1;
+            memcpy(rest + len, from, (size_t)(cut - from));
+            len += (int)(cut - from);
+        }
+        from = e;
+        if (!prev_end)
+            while (*from == ' ' || *from == '\t')
+                from++;
+    }
+    if (len + lstrlenA(from) >= rest_size)
+        return SetLastError(0), fail("Command line too long"), -1;
+    lstrcpyA(rest + len, from);
+    return count;
 }
 
-static int launch(const char *args)
+static int launch(const char *all_args)
 {
-    static char dir[MAX_PATH], exe[MAX_PATH + 16], dll[MAX_PATH + 16], cmd[8192];
+    static char dir[MAX_PATH], exe[MAX_PATH + 16], dll[MAX_PATH + 16], cmd[8192], args[8192];
+    static char extra[LOAD_DLL_MAX][MAX_PATH];
+    const int extras = take_load_dlls(all_args, args, sizeof args, extra);
+    if (extras < 0)
+        return 1;
     exe_dir(dir);
     lstrcpyA(exe, dir);
     lstrcatA(exe, "Zax.exe");
@@ -210,30 +240,18 @@ static int launch(const char *args)
     lstrcatA(cmd, "\" ");
     lstrcatA(cmd, args);
 
-    /* /Resolution: the size for this start only (the exe's /ScreenWidth and /ScreenHeight, which it does
-     * not write to Zax.CFG); other sizes than the exe's two only with Zax-Reimpl.dll and its ExtraModes */
-    int rw, rh, rk = resolution(args, &rw, &rh);
-    if (rk < 0)
-        return fail("/Resolution needs a size such as 1024x768");
-    if (rk > 0) {
-        char size[64];
-        if (!str_find(args, "/ScreenWidth")) {
-            wsprintfA(size, " /ScreenWidth %d /ScreenHeight %d", rw, rh);
-            lstrcatA(cmd, size);
-        }
-        if (!((rw == 640 && rh == 480) || (rw == 800 && rh == 600))) {
-            lstrcpyA(dll, dir);
-            lstrcatA(dll, "Zax-Reimpl.dll");
-            if (GetFileAttributesA(dll) == INVALID_FILE_ATTRIBUTES || has_switch(args, "/Original")) {
-                SetLastError(0);
-                return fail("/Resolution other than 640x480 or 800x600 needs Zax-Reimpl.dll (without /Original)");
-            }
-            wsprintfA(size, "%dx%d", rw, rh);
-            SetEnvironmentVariableA("ZAX_REIMPL_EXTRA_MODES", size);
-            lstrcpyA(dll, dir);
-            lstrcatA(dll, "Zax-Launcher.dll");
+    for (int i = 0; i < extras; i++) {
+        lstrcpyA(dll, dir);
+        lstrcatA(dll, extra[i]);
+        if (GetFileAttributesA(dll) == INVALID_FILE_ATTRIBUTES) {
+            SetLastError(0);
+            lstrcpyA(cmd, "/LoadDll: not found next to Zax.exe: ");
+            lstrcatA(cmd, extra[i]);
+            return fail(cmd);
         }
     }
+    lstrcpyA(dll, dir);
+    lstrcatA(dll, "Zax-Launcher.dll");
 
     STARTUPINFOA si;
     PROCESS_INFORMATION pi;
@@ -242,19 +260,24 @@ static int launch(const char *args)
     if (!CreateProcessA(exe, cmd, NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, dir, &si, &pi))
         return fail("Could not start Zax.exe");
 
-    /* Load the DLLs before Zax.exe continues. Zax-Reimpl.dll (our reimplementation of exe
-     * functions, reimpl/) only if it sits next to it. */
+    /* Load the DLLs before Zax.exe continues: Zax-Launcher.dll, then only those /LoadDll asked for (never one just
+     * because it lies in the folder) */
     if (!inject(pi.hProcess, dll)) {
         int rc = fail("Could not load Zax-Launcher.dll into Zax.exe");
         TerminateProcess(pi.hProcess, 1);
         return rc;
     }
-    lstrcpyA(dll, dir);
-    lstrcatA(dll, "Zax-Reimpl.dll");
-    if (GetFileAttributesA(dll) != INVALID_FILE_ATTRIBUTES && !inject(pi.hProcess, dll)) {
-        int rc = fail("Could not load Zax-Reimpl.dll into Zax.exe");
-        TerminateProcess(pi.hProcess, 1);
-        return rc;
+    for (int i = 0; i < extras; i++) {
+        lstrcpyA(dll, dir);
+        lstrcatA(dll, extra[i]);
+        if (!inject(pi.hProcess, dll)) {
+            lstrcpyA(cmd, "Could not load ");
+            lstrcatA(cmd, extra[i]);
+            lstrcatA(cmd, " into Zax.exe");
+            int rc = fail(cmd);
+            TerminateProcess(pi.hProcess, 1);
+            return rc;
+        }
     }
     ResumeThread(pi.hThread);
     CloseHandle(pi.hThread);
@@ -598,6 +621,9 @@ static void scan_zip(void)
         char name[MAX_PATH];
         for (DWORD p = 0, len; (len = zip_entry_at(cd + p, cd_size - p, &e)) != 0; p += len) {
             int k = zip_map_name(e.name, e.name_len, name, sizeof name);
+            /* sizes beyond the file are a damaged entry: left out */
+            if (e.local_off >= size || e.size > size - e.local_off)
+                continue;
             if (k > 0 && e.method == 0 && !add_map(name, k, 1, e.local_off, e.size))
                 break;
         }
@@ -757,10 +783,7 @@ static void build_args(void)
                 add_arg("/Difficulty %s", DIFFICULTY[i]);
     }
     int res = combo_data(ID_RES), depth = combo_data(ID_DEPTH);
-    if (res && !((LOWORD(res) == 640 && HIWORD(res) == 480) || (LOWORD(res) == 800 && HIWORD(res) == 600))) {
-        wsprintfA(buf, "/Resolution %dx%d", LOWORD(res), HIWORD(res));
-        add_arg("%s", buf);
-    } else if (res) {
+    if (res) {
         wsprintfA(buf, "/ScreenWidth %d /ScreenHeight %d", LOWORD(res), HIWORD(res));
         add_arg("%s", buf);
     }
@@ -866,14 +889,6 @@ static void fill_modes(void)
     SendMessageA(res, CB_SETCURSEL, 0, 0);
     add_mode(res, "640 x 480", MAKELONG(640, 480), want_res);
     add_mode(res, "800 x 600", MAKELONG(800, 600), want_res);
-    /* The experiment "higher resolutions" (/Resolution): only with Zax-Reimpl.dll next to the launcher */
-    char reimpl[MAX_PATH + 16];
-    lstrcpyA(reimpl, g_dir);
-    lstrcatA(reimpl, "Zax-Reimpl.dll");
-    if (GetFileAttributesA(reimpl) != INVALID_FILE_ATTRIBUTES) {
-        add_mode(res, "1024 x 768 (experiment, Zax-Reimpl)", MAKELONG(1024, 768), want_res);
-        add_mode(res, "1280 x 960 (experiment, Zax-Reimpl)", MAKELONG(1280, 960), want_res);
-    }
     add_mode(depth, "as set in the game", 0, -1);
     SendMessageA(depth, CB_SETCURSEL, 0, 0);
     add_mode(depth, "8 bit (256 colors)", 8, want_depth);
