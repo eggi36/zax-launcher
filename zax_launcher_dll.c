@@ -156,28 +156,6 @@ static void log_line(const char *fmt, ...)
 
 static DWORD rd(DWORD addr) { return *(DWORD *)addr; }
 
-/* Value after /Name on the command line, also in quotes. */
-static int arg_value(const char *cmd, const char *name, char *out, int size)
-{
-    int n = lstrlenA(name);
-    for (const char *p = cmd; *p; p++) {
-        if (*p != '/' || str_nieq(p + 1, name, n) != 0 || (p[1 + n] != ' ' && p[1 + n] != '\t'))
-            continue;
-        const char *v = p + 1 + n;
-        while (*v == ' ' || *v == '\t')
-            v++;
-        char end = ' ';
-        if (*v == '"')
-            end = *v++;
-        int i = 0;
-        while (v[i] && v[i] != end && i + 1 < size)
-            out[i] = v[i], i++;
-        out[i] = 0;
-        return i > 0;
-    }
-    return 0;
-}
-
 static int find_difficulty(void)
 {
     void *catalog = (void *)DIFF_CATALOG;
@@ -516,13 +494,15 @@ static void *THISCALL main_menu_ctor(void *self, void *arg)
 void __cdecl add_load_map(void *menu)
 {
     void *world = (void *)rd(WORLD);
-    void *obj = ((get_fn)(*(DWORD **)world)[VT_LOCAL_PLAYER / 4])(world);
-    if (((bool_fn)(*(DWORD **)obj)[VT_IS_CLIENT / 4])(obj))
+    void *obj = world ? ((get_fn)(*(DWORD **)world)[VT_LOCAL_PLAYER / 4])(world) : NULL;
+    if (!obj || ((bool_fn)(*(DWORD **)obj)[VT_IS_CLIENT / 4])(obj))
         return;
     void *button = ((alloc_fn)ALLOC)(BUTTON_SIZE);
     if (button)
         button = ((button_fn)BUTTON_CTOR)(button, menu, (void *)LABEL_LOAD_MAP, 0);
     *(void **)((BYTE *)menu + MENU_LOAD_MAP) = button;
+    if (!button)
+        return;
     log_line("Game menu: button \"%s\" created", ((cstr_fn)CSTRING_CSTR)((void *)LABEL_LOAD_MAP));
     ((add_fn)ADD_CONTROL)(menu, button, 8, 0, -1000, -1000, 0);
 }
