@@ -5,13 +5,14 @@ Zax-Launcher.exe, a launcher for the original Zax.exe of "Zax: The Alien Hunter"
     Zax-Launcher.exe [/Map "Act 1/M1M2/01 Main" [/Spawn "Game Start"] [/Difficulty Normal]]
                      [/LoadMap] [/SkipMovies] [/Cheats] [/DebugLog] [/ShowFPS] [/NetGraphs] [/DebugDraw] [/ShowHidden]
                      [/DrawOutlines] [/AltDirtyDraw] [/NoEntryDraw] [-host | -connect <address>] [-name <player>]
-                     [/LoadDll Name.dll]
+                     [/NoPack Name.RED] [/LoadDll Name.dll]
 
 - Start directly into a map (no main menu, no intro), at a start point and difficulty of your choice.
 - A "Load Map" button in the game menu (Esc) that loads any map under `Levels` (`/LoadMap`).
 - The developer switches still present in Zax.exe: debug log, frame rate, network graphs, the AIs' debug drawing, hidden parts, outlines, the developer cheats.
+- Leave packs out of a start: every `*.RED` next to Zax.exe (language packs, fix packs, mods) can be unticked on the start window's Packs page, or named with `/NoPack Name.RED` (repeatable). The files themselves are not renamed, moved or changed.
 - Everything is off by default: without switches the game starts as without the launcher (start movies, main menu, no "Load Map" button); `/SkipMovies` is Zax.exe's own switch and is passed on like every other argument.
-- Without arguments a start window opens (map, start point, difficulty, resolution, switches, LAN game); `/?` or `/help` shows the help.
+- Without arguments a start window opens (map, start point, difficulty, resolution, switches, LAN game, packs); `/?` or `/help` shows the help.
 
 | | |
 |---|---|
@@ -21,6 +22,14 @@ Zax-Launcher.exe, a launcher for the original Zax.exe of "Zax: The Alien Hunter"
 ![The game menu (Esc) with the "Load Map" button](docs/images/launcher-game-menu.png)
 
 *The game menu (Esc) with the launcher's "Load Map" button (`/LoadMap`).*
+
+### Packs
+
+Zax.exe mounts every `*.RED` in its folder after `DATA.dat`, in name order (as `_stricmp` sorts them), and a later pack replaces the files of an earlier one. The start window's Packs page lists them in that order, all ticked by default (the game as without the launcher); the choice is remembered in `Zax-Launcher.ini` (`[Packs]`, one line per pack). Each unticked pack becomes `/NoPack Name.RED` on the command line, and Zax-Launcher.dll skips exactly those names in the game's own mount loop; everything else, including the order of the remaining packs, stays as the game does it. So, for example, the German edition starts in English with `/NoPack GERMAN.RED`, or a fix pack can be tried and left out again without moving files around.
+
+![The Packs page: every *.RED next to Zax.exe with a check box, in load order](docs/images/launcher-packs.png)
+
+*The Packs page of the start window.*
 
 The launcher works with the original Zax.exe alone and loads no DLL into it but its own, whatever lies in the game folder. For developers, `/LoadDll Name.dll` (repeatable, at most 4) also loads a DLL that lies next to Zax.exe, after Zax-Launcher.dll; it is the only switch the launcher takes out of the command line, so Zax.exe gets the same command line as without it. The decompilation (zax-decomp) is a separate repository; its test tools load its `Zax-Reimpl.dll` this way. How each switch works in the exe, with addresses and evidence: zax-decomp's `docs/EXE_FINDINGS.md` and `docs/DECOMPILATION.md`.
 

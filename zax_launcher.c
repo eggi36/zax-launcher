@@ -3,11 +3,11 @@
  *   Zax-Launcher.exe [/Map "Act 1/M1M2/01 Main" [/Spawn "Game Start"] [/Difficulty Normal]]
  *                 [/LoadMap] [/SkipMovies] [/Cheats] [/DebugLog] [/ShowFPS] [/NetGraphs] [/DebugDraw] [/ShowHidden]
  *                 [/DrawOutlines] [/AltDirtyDraw] [/NoEntryDraw] [-host | -connect <address>] [-name <player>]
- *                 [/LoadDll Name.dll]
+ *                 [/NoPack Name.RED] [/LoadDll Name.dll]
  *
  * Without arguments a start window appears: choose map (from Data\Levels and from Data.dat), start
- * point, difficulty, resolution (only 640 x 480 or 800 x 600, 8 or 16 bit), switches and a LAN game
- * (the exe's own -host / -connect / -name); the selection is remembered in Zax-Launcher.ini next to the exe.
+ * point, difficulty, resolution (only 640 x 480 or 800 x 600, 8 or 16 bit), switches, a LAN game
+ * (the exe's own -host / -connect / -name) and the packs (*.RED) to load; the selection is remembered in Zax-Launcher.ini next to the exe.
  * /? or /help shows the help in a scrollable window; in the start window every control has a tooltip.
  * All arguments are passed to Zax.exe unchanged (e.g. /ScreenWidth 800, /SkipMovies), nothing is added: without
  * switches the game starts as without the launcher (movies, main menu, no "Load Map" button).
@@ -35,7 +35,8 @@ static const char HELP[] =
     "Zax-Launcher starts Zax.exe from the same folder and adds\n"
     "- starting directly into a map (no main menu, no intro),\n"
     "- the \"Load Map\" button in the game menu (Esc), which loads any map under Levels,\n"
-    "- the developer cheats and switches that are still in Zax.exe.\n"
+    "- the developer cheats and switches that are still in Zax.exe,\n"
+    "- leaving packs (*.RED) out of a start without touching the files.\n"
     "Each is off unless its switch is given; without switches the game starts as\n"
     "usual (movies, main menu). Zax.exe itself is not modified.\n\n"
     "Without arguments a launcher window opens. With arguments the game starts\n"
@@ -101,6 +102,12 @@ static const char HELP[] =
     "-name \"Player\"\n"
     "    the player name for -host or -connect (otherwise the one of the\n"
     "    multiplayer options).\n"
+    "/NoPack Name.RED\n"
+    "    leaves that pack (a *.RED next to Zax.exe) out of this start; repeatable.\n"
+    "    Zax.exe loads every *.RED next to it after Data.dat, in name order, and a\n"
+    "    later one replaces the same files of an earlier one. The file itself is\n"
+    "    not renamed, moved or changed. The Packs page of the launcher window\n"
+    "    lists them with a check box each.\n"
     "/LoadDll Name.dll\n"
     "    for developers: also loads that DLL from the folder of Zax.exe into\n"
     "    Zax.exe, after Zax-Launcher.dll (repeatable, at most 4). Without it the\n"
@@ -115,7 +122,8 @@ static const char HELP[] =
     "Examples:\n"
     "  Zax-Launcher.exe /Map \"Eigene/Level 1\"\n"
     "  Zax-Launcher.exe /Map \"Act 1/M1M2/01 Main\" /Spawn \"Game Start\" /Difficulty Hard\n"
-    "  Zax-Launcher.exe -connect 198.51.100.10 -name Player /NetGraphs\n\n"
+    "  Zax-Launcher.exe -connect 198.51.100.10 -name Player /NetGraphs\n"
+    "  Zax-Launcher.exe /NoPack GermanFix.RED\n\n"
     "Shortcut: right-click Zax-Launcher.exe, Create shortcut, then append the\n"
     "arguments to \"Target\" in its Properties. The launcher window shows the\n"
     "matching command line for the current selection.\n"
@@ -424,7 +432,8 @@ enum {
     ID_MAPS = 100, ID_SPAWN, ID_EASY, ID_NORMAL, ID_HARD, ID_RES, ID_DEPTH,
     ID_SKIP, ID_LOADMAP, ID_CHEATS, ID_DEBUGLOG, ID_SHOWFPS, ID_NETGRAPHS, ID_DEBUGDRAW, ID_SHOWHIDDEN, ID_OUTLINES, ID_ALTDIRTY,
     ID_NOENTRY, ID_CMDLINE, ID_HELP, ID_TABS,
-    ID_SINGLE, ID_HOST, ID_JOIN, ID_NAME, ID_ADDRESS
+    ID_SINGLE, ID_HOST, ID_JOIN, ID_NAME, ID_ADDRESS,
+    ID_PACKS = 300, ID_PACKS_ALL, ID_PACKS_NOTE
 };
 static const char *const LAN_MODE[] = {"Off", "Host", "Join"};
 /* The switches of things Zax.exe still contains but never shows (Zax-Launcher.dll turns them on); the ini key is the
@@ -447,8 +456,8 @@ static const char MAIN_MENU[] = "(Main menu: normal start)";
 static HWND g_wnd;
 /* The start window's tabs (so it fits a 640 x 480 desktop); the controls are children of the window itself, each
  * on one page (PAGE_ALL: below the tabs), shown or hidden when the tab changes */
-enum { PAGE_START, PAGE_LAN, PAGE_DEVELOPER, PAGES, PAGE_ALL = -1 };
-static const char *const PAGE_NAME[PAGES] = {"Start", "LAN game", "Developer"};
+enum { PAGE_START, PAGE_LAN, PAGE_DEVELOPER, PAGE_PACKS, PAGES, PAGE_ALL = -1 };
+static const char *const PAGE_NAME[PAGES] = {"Start", "LAN game", "Developer", "Packs"};
 static struct {
     HWND wnd;
     int page;
@@ -761,6 +770,86 @@ static void add_arg(const char *fmt, const char *value)
     }
 }
 
+/* ---- Packs page: the *.RED beside Zax.exe -----------------------------------------------------------------------
+ * Zax.exe mounts every *.RED of its folder after Data.dat, in _stricmp name order, and a later pack wins file by file
+ * (zax-decomp docs/DECOMPILATION.md, "Mounting at start"). The page lists them in that order with a check box each,
+ * all ticked by default (the game as without the launcher); every unticked one becomes /NoPack Name.RED, which
+ * Zax-Launcher.dll leaves out of the game's mount loop. No file in the game folder is renamed, moved or changed.
+ * Remembered in Zax-Launcher.ini, [Packs]: one line per pack, Name.RED=1 or 0; a pack not named there is ticked. */
+enum { PACKS_MAX = 64, PACK_NAME = 0x50 };   /* the game keeps each name in 0x50 bytes */
+static struct {
+    char name[PACK_NAME];
+    DWORD size;
+} g_packs[PACKS_MAX];
+static int g_pack_count, g_packs_ready;
+
+/* _stricmp: the ASCII letters compared as lower case */
+static int pack_cmp(const char *a, const char *b)
+{
+    for (;; a++, b++) {
+        const char x = lower(*a), y = lower(*b);
+        if (x != y)
+            return (unsigned char)x < (unsigned char)y ? -1 : 1;
+        if (!x)
+            return 0;
+    }
+}
+
+/* What the game's own search finds (FindFirstFileA over *.RED in its folder, files only, no name starting with '.'),
+ * sorted */
+static void scan_packs(void)
+{
+    char pattern[MAX_PATH + 16];
+    wsprintfA(pattern, "%s*.RED", g_dir);
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA(pattern, &fd);
+    if (h == INVALID_HANDLE_VALUE)
+        return;
+    do {
+        if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || fd.cFileName[0] == '.' ||
+            lstrlenA(fd.cFileName) >= PACK_NAME || g_pack_count == PACKS_MAX)
+            continue;
+        int at = g_pack_count++;
+        for (; at > 0 && pack_cmp(g_packs[at - 1].name, fd.cFileName) > 0; at--)
+            g_packs[at] = g_packs[at - 1];
+        lstrcpyA(g_packs[at].name, fd.cFileName);
+        g_packs[at].size = fd.nFileSizeLow;
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+}
+
+static int pack_on(int i)
+{
+    return g_packs_ready ? ListView_GetCheckState(item(ID_PACKS), i) != 0 : 1;
+}
+
+/* The unticked packs as /NoPack, and the note below the list */
+static void pack_args(void)
+{
+    int off = 0;
+    for (int i = 0; i < g_pack_count; i++)
+        if (!pack_on(i)) {
+            add_arg(str_find(g_packs[i].name, " ") ? "/NoPack \"%s\"" : "/NoPack %s", g_packs[i].name);
+            off++;
+        }
+    if (!g_packs_ready)
+        return;
+    char note[96];
+    if (!g_pack_count)
+        lstrcpyA(note, "No *.RED next to Zax.exe.");
+    else if (!off)
+        lstrcpyA(note, "All ticked: the game loads them as without the launcher.");
+    else
+        wsprintfA(note, "%d of %d left out of this start.", off, g_pack_count);
+    SetWindowTextA(item(ID_PACKS_NOTE), note);
+}
+
+static void save_packs(void)
+{
+    for (int i = 0; i < g_pack_count; i++)
+        WritePrivateProfileStringA("Packs", g_packs[i].name, pack_on(i) ? "1" : "0", g_ini);
+}
+
 /* Selection in the window as arguments for launch() and for display */
 static void build_args(void)
 {
@@ -804,6 +893,7 @@ static void build_args(void)
     for (int i = 0; i < DRAW_SWITCHES; i++)
         if (checked(DRAW_SWITCH[i].id) && (DRAW_SWITCH[i].id != ID_SHOWHIDDEN || checked(ID_DEBUGDRAW)))
             add_arg("%s", DRAW_SWITCH[i].arg);
+    pack_args();
 
     static char shown[sizeof g_args + 32];
     wsprintfA(shown, "Zax-Launcher.exe %s", g_args);
@@ -843,6 +933,7 @@ static void save_settings(void)
     WritePrivateProfileStringA("Launcher", "HostAddress", buf, g_ini);
     wsprintfA(buf, "%d", g_page);
     WritePrivateProfileStringA("Launcher", "Page", buf, g_ini);
+    save_packs();
 }
 
 /* A LAN game picks its map in the host options: the map, spawn and difficulty only without one; the host
@@ -916,6 +1007,46 @@ static void show_page(int page)
             ShowWindow(g_controls[i].wnd, g_controls[i].page == page ? SW_SHOW : SW_HIDE);
 }
 
+/* The Packs page: a list with a check box per pack in load order, its size, and "Tick all" */
+static void create_packs_page(void)
+{
+    g_build_page = PAGE_PACKS;
+    add(0, "STATIC", "Zax.exe loads every *.RED next to it after Data.dat, in this order; a later pack replaces the same\n"
+                     "files of an earlier one. Untick a pack to leave it out of this start (the file is not touched).",
+        WS_GROUP, 20, 40, 556, 32, -1);
+    HWND list = add(WS_EX_CLIENTEDGE, WC_LISTVIEWA, "",
+                    WS_TABSTOP | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOSORTHEADER, 20, 78, 556, 206, ID_PACKS);
+    SendMessageA(list, LVM_SETEXTENDEDLISTVIEWSTYLE, LVS_EX_CHECKBOXES | LVS_EX_FULLROWSELECT,
+                 LVS_EX_CHECKBOXES | LVS_EX_FULLROWSELECT);
+    LVCOLUMNA col;
+    memset(&col, 0, sizeof col);
+    col.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_FMT;
+    col.pszText = (LPSTR)"Pack (load order)";
+    col.cx = 420;
+    SendMessageA(list, LVM_INSERTCOLUMNA, 0, (LPARAM)&col);
+    col.fmt = LVCFMT_RIGHT;
+    col.pszText = (LPSTR)"Size";
+    col.cx = 110;
+    SendMessageA(list, LVM_INSERTCOLUMNA, 1, (LPARAM)&col);
+    for (int i = 0; i < g_pack_count; i++) {
+        LVITEMA it;
+        memset(&it, 0, sizeof it);
+        it.mask = LVIF_TEXT;
+        it.iItem = i;
+        it.pszText = g_packs[i].name;
+        SendMessageA(list, LVM_INSERTITEMA, 0, (LPARAM)&it);
+        char size[32];
+        wsprintfA(size, "%lu KB", (g_packs[i].size + 1023) / 1024);
+        it.iSubItem = 1;
+        it.pszText = size;
+        SendMessageA(list, LVM_SETITEMTEXTA, (WPARAM)i, (LPARAM)&it);
+        ListView_SetCheckState(list, i, GetPrivateProfileIntA("Packs", g_packs[i].name, 1, g_ini) != 0);
+    }
+    add(0, "BUTTON", "Tick all", WS_TABSTOP, 20, 292, 88, 24, ID_PACKS_ALL);
+    add(0, "STATIC", "", 0, 120, 296, 456, 16, ID_PACKS_NOTE);   /* pack_args writes it */
+    g_packs_ready = 1;
+}
+
 /* Tooltips of the start window: the short form of HELP next to each control */
 static const struct {
     int id;
@@ -955,6 +1086,9 @@ static const struct {
     {ID_NAME, "Your player name in the LAN game (-name). Empty: the one of the game's multiplayer options."},
     {ID_ADDRESS, "IP address or computer name of the host to join."},
     {ID_CMDLINE, "The same start as a command line: append it to \"Target\" of a shortcut to Zax-Launcher.exe."},
+    {ID_PACKS, "The packs (*.RED) next to Zax.exe in the order the game loads them; a later one wins. Unticked ones are left out "
+               "of this start (/NoPack Name.RED); the files stay as they are."},
+    {ID_PACKS_ALL, "Ticks every pack: the game loads them all, as without the launcher."},
     {ID_HELP, "All switches, the cheat keys and examples."},
     {IDOK, "Starts Zax.exe with this selection (remembered in Zax-Launcher.ini)."},
 };
@@ -1033,6 +1167,8 @@ static void create_controls(void)
     for (int i = 0; i < DRAW_SWITCHES; i++)
         add(0, "BUTTON", DRAW_SWITCH[i].text, WS_TABSTOP | BS_AUTOCHECKBOX, 20, 140 + 22 * i, 300, 18, DRAW_SWITCH[i].id);
 
+    create_packs_page();
+
     g_build_page = PAGE_ALL;
     add(0, "STATIC", "Shortcut target:", 0, 12, 344, 90, 16, -1);
     add(WS_EX_CLIENTEDGE, "EDIT", "", WS_TABSTOP | ES_READONLY | ES_AUTOHSCROLL, 104, 340, 484, 22, ID_CMDLINE);
@@ -1104,6 +1240,8 @@ static LRESULT CALLBACK wnd_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_NOTIFY:
         if (((NMHDR *)lp)->idFrom == ID_TABS && ((NMHDR *)lp)->code == TCN_SELCHANGE)
             show_page((int)SendMessageA(item(ID_TABS), TCM_GETCURSEL, 0, 0));
+        if (((NMHDR *)lp)->idFrom == ID_PACKS && ((NMHDR *)lp)->code == LVN_ITEMCHANGED && g_packs_ready)
+            build_args();
         return 0;
     case WM_COMMAND: {
         int id = LOWORD(wp), code = HIWORD(wp);
@@ -1133,6 +1271,9 @@ static LRESULT CALLBACK wnd_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
         }
         if (id == ID_HELP)
             show_help(wnd);
+        if (id == ID_PACKS_ALL)
+            for (int i = 0; i < g_pack_count; i++)
+                ListView_SetCheckState(item(ID_PACKS), i, TRUE);
         if (id != ID_CMDLINE)
             build_args();
         return 0;
@@ -1162,6 +1303,7 @@ static int launcher(void)
     }
     scan_maps("");
     scan_zip();
+    scan_packs();
 
     WNDCLASSA wc;
     memset(&wc, 0, sizeof wc);
