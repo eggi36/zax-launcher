@@ -19,6 +19,8 @@
  *   /AltDirtyDraw               the second mode of drawing the dirty tiles (byte 0x6c1cf7; the same picture,
  *                               docs/EXE_FINDINGS.md)
  *   /NoEntryDraw                no queue entry drawn in the dirty tiles (byte 0x6c1cf8)
+ *   /NoPack Name.RED            leave that pack beside Zax.exe out when the game mounts its *.RED (repeatable);
+ *                               the file itself is not touched
  * When the main menu is created for the first time (at the end of loading the game data,
  * App_LoadGameData 0x5a01c0 -> World_OpenMainMenu 0x59bab0), the DLL does what a click on a
  * difficulty does (Zax.exe 0x5bfbc1), only without the movie and with the selected map, in the
@@ -472,6 +474,99 @@ static void set_draw_byte(DWORD address, const char *what)
     log_line("%s enabled", what);
 }
 
+/* ---- Packs: /NoPack Name.RED ----------------------------------------------------------------------------------
+ * Zip_MountAll 0x4a0c40 (called by Game_Startup with "Data") lists every *.RED of the game folder ("./") (Files_Search,
+ * 0x50 bytes a name), sorts them with _stricmp, mounts the exe, Data.ZIP or Data.DAT, and then each pack in its loop
+ * at 0x4a0e79 as a new root: ZipList_Mount 0x5c1a30 (thiscall list, (archive, 1, 0, "/", 0, 0), ret 0x18, al =
+ * mounted). The later root wins (ZZipList::Open 0x5c1c70 searches from the last). The DLL points that one call at
+ * mount_pack, which leaves out the packs named by /NoPack and mounts every other as before; the files in the game
+ * folder stay as they are. The loop lies below 0x59fc70, so 1309 has it at the same address; only the call's target
+ * moves (zax-decomp reimpl/src/zip_archive.cpp, docs/DECOMPILATION.md "Mounting at start"). */
+#define PACK_LOOP       0x4a0e79   /* push 0; push 0; push "/"; push 0; push 1; push esi; mov ecx,edi; call */
+#define PACK_MOUNT_CALL 0x4a0e89
+#define ZIP_MOUNT       CODE(0x5c1a30)
+enum { NO_PACK_MAX = 32, PACK_NAME_MAX = 0x50 };
+static char g_no_pack[NO_PACK_MAX][PACK_NAME_MAX];
+static int g_no_pack_count, g_no_pack_used[NO_PACK_MAX];
+typedef char (THISCALL *mount_fn)(void *list, const char *archive, DWORD new_root, DWORD check, const char *at,
+                                  DWORD lazy, DWORD flags);
+
+/* The file name without a folder ("./GERMAN.RED" -> "GERMAN.RED") */
+static const char *base_name(const char *path)
+{
+    const char *base = path;
+    for (const char *p = path; *p; p++)
+        if (*p == '/' || *p == '\\' || *p == ':')
+            base = p + 1;
+    return base;
+}
+
+static char THISCALL mount_pack(void *list, const char *archive, DWORD new_root, DWORD check, const char *at,
+                                DWORD lazy, DWORD flags)
+{
+    const char *name = base_name(archive);
+    const int n = lstrlenA(name);
+    for (int i = 0; i < g_no_pack_count; i++)
+        if (lstrlenA(g_no_pack[i]) == n && str_nieq(name, g_no_pack[i], n) == 0) {
+            g_no_pack_used[i] = 1;
+            log_line("Pack %s left out (/NoPack)", archive);
+            return 0;
+        }
+    const char mounted = ((mount_fn)ZIP_MOUNT)(list, archive, new_root, check, at, lazy, flags);
+    log_line("Pack %s mounted%s", archive, mounted ? "" : " - failed");
+    return mounted;
+}
+
+/* Every /NoPack value of the command line (repeatable), without quotes and folder */
+static void read_no_packs(const char *cmd)
+{
+    const char *e;
+    for (const char *t = next_token(cmd, &e); t; t = next_token(e, &e)) {
+        if (!token_is(t, e, "/NoPack"))
+            continue;
+        const char *v = next_token(e, &e);
+        char name[MAX_PATH];
+        int i = 0;
+        for (; v && v < e && i + 1 < (int)sizeof name; v++)
+            if (*v != '"')
+                name[i++] = *v;
+        name[i] = 0;
+        const char *base = base_name(name);
+        if (!*base || lstrlenA(base) >= PACK_NAME_MAX) {
+            log_line("/NoPack without a usable pack name, ignored");
+            continue;
+        }
+        if (g_no_pack_count == NO_PACK_MAX) {
+            log_line("/NoPack %s: more than %d packs, ignored", base, NO_PACK_MAX);
+            continue;
+        }
+        lstrcpyA(g_no_pack[g_no_pack_count++], base);
+    }
+}
+
+static void install_no_packs(void)
+{
+    static const BYTE expect[] = {0x6a, 0x00, 0x6a, 0x00, 0x68, 0x90, 0x03, 0x61, 0x00, 0x6a, 0x00, 0x6a, 0x01,
+                                  0x56, 0x8b, 0xcf, 0xe8};
+    BYTE *loop = (BYTE *)PACK_LOOP, *site = (BYTE *)PACK_MOUNT_CALL;
+    for (int i = 0; i < (int)sizeof expect; i++)
+        if (loop[i] != expect[i]) {
+            log_line("Pack mount loop does not match, different Zax.exe? Every pack is mounted.");
+            return;
+        }
+    if ((DWORD)(site + 5) + *(INT32 *)(site + 1) != ZIP_MOUNT) {
+        log_line("Pack mount loop does not match, different Zax.exe? Every pack is mounted.");
+        return;
+    }
+    DWORD old;
+    VirtualProtect(site, 5, PAGE_EXECUTE_READWRITE, &old);
+    *(INT32 *)(site + 1) = (INT32)((BYTE *)mount_pack - (site + 5));
+    VirtualProtect(site, 5, old, &old);
+    FlushInstructionCache(GetCurrentProcess(), site, 5);
+    for (int i = 0; i < g_no_pack_count; i++)
+        log_line("Pack %s will be left out", g_no_pack[i]);
+}
+
 /* Replacement for the main menu constructor at all call sites. */
 static void *THISCALL main_menu_ctor(void *self, void *arg)
 {
@@ -590,6 +685,9 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
         log_line("Not a Zax.exe the launcher knows (supported: build 1308 and 1309 without copy protection). No changes.");
         return TRUE;
     }
+    read_no_packs(cmd);
+    if (g_no_pack_count)
+        install_no_packs();
     if (has_switch(cmd, "/LoadMap"))
         install_load_map();
     if (has_switch(cmd, "/Cheats"))
