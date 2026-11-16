@@ -15,6 +15,8 @@ build.sh           builds Zax-Launcher.exe and .dll with zig (default output out
 make_icon.py       the icon of Zax.exe as .ico (pefile, Pillow; never committed)
 zax_launcher.c     the exe: start window, help, command line, starts Zax.exe with the DLL
 zax_launcher_dll.c the DLL: patches the running Zax.exe (direct start, Load Map, debug switches)
+zax_fixes.h        the DLL's fixes of the original's bugs (/Fix Name), included by zax_launcher_dll.c; docs/FIXES.md
+fixes.h            the fixes' names, labels and tooltips, shared by the exe (Fixes page, help) and the DLL
 edition.h          which Zax.exe it is (build, SecuROM) and the 1309 code shift; used by the exe and the DLL
 mini.h             the few C library functions without a C runtime
 zipdir.h           the directory of Data.dat (a zip) for the map list, without Windows calls
