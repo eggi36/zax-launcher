@@ -3,11 +3,12 @@
  *   Zax-Launcher.exe [/Map "Act 1/M1M2/01 Main" [/Spawn "Game Start"] [/Difficulty Normal]]
  *                 [/LoadMap] [/SkipMovies] [/Cheats] [/DebugLog] [/ShowFPS] [/NetGraphs] [/DebugDraw] [/ShowHidden]
  *                 [/DrawOutlines] [/AltDirtyDraw] [/NoEntryDraw] [-host | -connect <address>] [-name <player>]
- *                 [/NoPack Name.RED] [/LoadDll Name.dll]
+ *                 [/NoPack Name.RED] [/Fix Name ...] [/LoadDll Name.dll]
  *
  * Without arguments a start window appears: choose map (from Data\Levels and from Data.dat), start
  * point, difficulty, resolution (only 640 x 480 or 800 x 600, 8 or 16 bit), switches, a LAN game
- * (the exe's own -host / -connect / -name) and the packs (*.RED) to load; the selection is remembered in Zax-Launcher.ini next to the exe.
+ * (the exe's own -host / -connect / -name), the packs (*.RED) to load and the fixes (/Fix); the selection is
+ * remembered in Zax-Launcher.ini next to the exe.
  * /? or /help shows the help in a scrollable window; in the start window every control has a tooltip.
  * All arguments are passed to Zax.exe unchanged (e.g. /ScreenWidth 800, /SkipMovies), nothing is added: without
  * switches the game starts as without the launcher (movies, main menu, no "Load Map" button).
@@ -21,6 +22,7 @@
 #include "mini.h"
 #include "zipdir.h"
 #include "edition.h"
+#include "fixes.h"
 
 static int fail(const char *what)
 {
@@ -36,7 +38,8 @@ static const char HELP[] =
     "- starting directly into a map (no main menu, no intro),\n"
     "- the \"Load Map\" button in the game menu (Esc), which loads any map under Levels,\n"
     "- the developer cheats and switches that are still in Zax.exe,\n"
-    "- leaving packs (*.RED) out of a start without touching the files.\n"
+    "- leaving packs (*.RED) out of a start without touching the files,\n"
+    "- fixes of bugs of the original game (/Fix).\n"
     "Each is off unless its switch is given; without switches the game starts as\n"
     "usual (movies, main menu). Zax.exe itself is not modified.\n\n"
     "Without arguments a launcher window opens. With arguments the game starts\n"
@@ -108,6 +111,31 @@ static const char HELP[] =
     "    later one replaces the same files of an earlier one. The file itself is\n"
     "    not renamed, moved or changed. The Packs page of the launcher window\n"
     "    lists them with a check box each.\n"
+    "/Fix Name\n"
+    "    a fix of a bug of the original game, made in the running Zax.exe\n"
+    "    (repeatable; /Fix:Name is the same). Off unless given; the start\n"
+    "    window's Fixes page ticks DPlaySlot100 by default. The names:\n"
+    "    MultiplayerCfg     LAN games keep the resolution in Zax.CFG\n"
+    "    DisableMiniMap     obey levels' \"Disable Mini-Map\" field\n"
+    "    SoundChannels      remember the sound channel choice\n"
+    "    PlayOnceAfterLoad  saved animations resume at their speed\n"
+    "    DrawHudCrash       no crash at the HUD's direction pointer (1308)\n"
+    "    CompanionSpot      companions keep their computed spot\n"
+    "    SmoothTurning      obey \"Smooth Turning\" off for chasers\n"
+    "    ShieldOverflow     shield lets excess damage through (harder)\n"
+    "    PickupRefused      refused pickups stay on the ground (mods)\n"
+    "    UseItems           using several items uses different ones (mods)\n"
+    "    OldPatrolSeed      old patrol AI does not reset randomness\n"
+    "    FidgetNext         fidget animation order 5 advances (mods)\n"
+    "    DPlaySlot100       LAN: a new player's slot stays in range\n"
+    "    AimCentre          aiming centre follows the game's size\n"
+    "    NoWriteBack        do not rewrite definition files on load\n"
+    "    QuitDuringMovie    no crash when closing during a movie\n"
+    "    GroundBlend        smoother 16-bit plasma ground\n"
+    "    AmplifyGreen       exact green in Amplify Light (16-bit)\n"
+    "    Some change how the game plays (CompanionSpot, SmoothTurning,\n"
+    "    ShieldOverflow, OldPatrolSeed); the tooltips of the Fixes page and\n"
+    "    docs/FIXES.md say what each does.\n"
     "/LoadDll Name.dll\n"
     "    for developers: also loads that DLL from the folder of Zax.exe into\n"
     "    Zax.exe, after Zax-Launcher.dll (repeatable, at most 4). Without it the\n"
@@ -123,7 +151,8 @@ static const char HELP[] =
     "  Zax-Launcher.exe /Map \"Eigene/Level 1\"\n"
     "  Zax-Launcher.exe /Map \"Act 1/M1M2/01 Main\" /Spawn \"Game Start\" /Difficulty Hard\n"
     "  Zax-Launcher.exe -connect 198.51.100.10 -name Player /NetGraphs\n"
-    "  Zax-Launcher.exe /NoPack GermanFix.RED\n\n"
+    "  Zax-Launcher.exe /NoPack GermanFix.RED\n"
+    "  Zax-Launcher.exe /Fix QuitDuringMovie /Fix ShieldOverflow\n\n"
     "Shortcut: right-click Zax-Launcher.exe, Create shortcut, then append the\n"
     "arguments to \"Target\" in its Properties. The launcher window shows the\n"
     "matching command line for the current selection.\n"
@@ -433,7 +462,8 @@ enum {
     ID_SKIP, ID_LOADMAP, ID_CHEATS, ID_DEBUGLOG, ID_SHOWFPS, ID_NETGRAPHS, ID_DEBUGDRAW, ID_SHOWHIDDEN, ID_OUTLINES, ID_ALTDIRTY,
     ID_NOENTRY, ID_CMDLINE, ID_HELP, ID_TABS,
     ID_SINGLE, ID_HOST, ID_JOIN, ID_NAME, ID_ADDRESS,
-    ID_PACKS = 300, ID_PACKS_ALL, ID_PACKS_NOTE
+    ID_PACKS = 300, ID_PACKS_ALL, ID_PACKS_NOTE,
+    ID_FIX = 400   /* ID_FIX + i: the box of FIX[i] (fixes.h) */
 };
 static const char *const LAN_MODE[] = {"Off", "Host", "Join"};
 /* The switches of things Zax.exe still contains but never shows (Zax-Launcher.dll turns them on); the ini key is the
@@ -456,12 +486,12 @@ static const char MAIN_MENU[] = "(Main menu: normal start)";
 static HWND g_wnd;
 /* The start window's tabs (so it fits a 640 x 480 desktop); the controls are children of the window itself, each
  * on one page (PAGE_ALL: below the tabs), shown or hidden when the tab changes */
-enum { PAGE_START, PAGE_LAN, PAGE_DEVELOPER, PAGE_PACKS, PAGES, PAGE_ALL = -1 };
-static const char *const PAGE_NAME[PAGES] = {"Start", "LAN game", "Developer", "Packs"};
+enum { PAGE_START, PAGE_LAN, PAGE_DEVELOPER, PAGE_PACKS, PAGE_FIXES, PAGES, PAGE_ALL = -1 };
+static const char *const PAGE_NAME[PAGES] = {"Start", "LAN game", "Developer", "Packs", "Fixes"};
 static struct {
     HWND wnd;
     int page;
-} g_controls[96];
+} g_controls[128];
 static int g_control_count, g_build_page = PAGE_ALL, g_page;
 
 static char g_dir[MAX_PATH], g_ini[MAX_PATH + 16], g_rules_spawn[256];
@@ -850,6 +880,52 @@ static void save_packs(void)
         WritePrivateProfileStringA("Packs", g_packs[i].name, pack_on(i) ? "1" : "0", g_ini);
 }
 
+/* ---- Fixes page (fixes.h): one box per fix, remembered in [Fixes] of Zax-Launcher.ini, /Fix Name when ticked ---- */
+
+static HWND add(DWORD ex, const char *cls, const char *text, DWORD style, int x, int y, int w, int h, int id);
+
+static void fixes_args(void)
+{
+    for (int i = 0; i < FIXES; i++)
+        if (checked(ID_FIX + i))
+            add_arg("/Fix %s", FIX[i].name);
+}
+
+static void save_fixes(void)
+{
+    for (int i = 0; i < FIXES; i++)
+        WritePrivateProfileStringA("Fixes", FIX[i].name, checked(ID_FIX + i) ? "1" : "0", g_ini);
+}
+
+/* Built on its own page; the boxes in two columns, each ticked as remembered or by its default */
+static void create_fixes_page(void)
+{
+    g_build_page = PAGE_FIXES;
+    add(0, "STATIC", "Fixes of bugs of the original game, made in the running Zax.exe (/Fix). Unticked: as the "
+                     "original.", 0, 20, 40, 556, 16, -1);
+    for (int i = 0; i < FIXES; i++) {
+        const int column = i / ((FIXES + 1) / 2), row = i % ((FIXES + 1) / 2);
+        HWND box = add(0, "BUTTON", FIX[i].label, WS_TABSTOP | BS_AUTOCHECKBOX, 20 + 282 * column, 62 + 22 * row, 276, 18,
+                       ID_FIX + i);
+        const int on = (int)GetPrivateProfileIntA("Fixes", FIX[i].name, FIX[i].on_in_window, g_ini);
+        SendMessageA(box, BM_SETCHECK, on ? BST_CHECKED : BST_UNCHECKED, 0);
+    }
+}
+
+static void add_fix_tooltips(HWND tip)
+{
+    for (int i = 0; i < FIXES; i++) {
+        TTTOOLINFOA ti;
+        memset(&ti, 0, sizeof ti);
+        ti.cbSize = TTTOOLINFOA_V2_SIZE;
+        ti.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
+        ti.hwnd = g_wnd;
+        ti.uId = (UINT_PTR)item(ID_FIX + i);
+        ti.lpszText = (LPSTR)FIX[i].tip;
+        SendMessageA(tip, TTM_ADDTOOLA, 0, (LPARAM)&ti);
+    }
+}
+
 /* Selection in the window as arguments for launch() and for display */
 static void build_args(void)
 {
@@ -894,6 +970,7 @@ static void build_args(void)
         if (checked(DRAW_SWITCH[i].id) && (DRAW_SWITCH[i].id != ID_SHOWHIDDEN || checked(ID_DEBUGDRAW)))
             add_arg("%s", DRAW_SWITCH[i].arg);
     pack_args();
+    fixes_args();
 
     static char shown[sizeof g_args + 32];
     wsprintfA(shown, "Zax-Launcher.exe %s", g_args);
@@ -934,6 +1011,7 @@ static void save_settings(void)
     wsprintfA(buf, "%d", g_page);
     WritePrivateProfileStringA("Launcher", "Page", buf, g_ini);
     save_packs();
+    save_fixes();
 }
 
 /* A LAN game picks its map in the host options: the map, spawn and difficulty only without one; the host
@@ -1112,6 +1190,7 @@ static void add_tooltips(void)
         ti.lpszText = (LPSTR)TIP[i].text;
         SendMessageA(tip, TTM_ADDTOOLA, 0, (LPARAM)&ti);
     }
+    add_fix_tooltips(tip);
 }
 
 static void create_controls(void)
@@ -1168,6 +1247,7 @@ static void create_controls(void)
         add(0, "BUTTON", DRAW_SWITCH[i].text, WS_TABSTOP | BS_AUTOCHECKBOX, 20, 140 + 22 * i, 300, 18, DRAW_SWITCH[i].id);
 
     create_packs_page();
+    create_fixes_page();
 
     g_build_page = PAGE_ALL;
     add(0, "STATIC", "Shortcut target:", 0, 12, 344, 90, 16, -1);

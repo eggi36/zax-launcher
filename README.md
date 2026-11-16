@@ -5,19 +5,24 @@ Zax-Launcher.exe, a launcher for the original Zax.exe of "Zax: The Alien Hunter"
     Zax-Launcher.exe [/Map "Act 1/M1M2/01 Main" [/Spawn "Game Start"] [/Difficulty Normal]]
                      [/LoadMap] [/SkipMovies] [/Cheats] [/DebugLog] [/ShowFPS] [/NetGraphs] [/DebugDraw] [/ShowHidden]
                      [/DrawOutlines] [/AltDirtyDraw] [/NoEntryDraw] [-host | -connect <address>] [-name <player>]
-                     [/NoPack Name.RED] [/LoadDll Name.dll]
+                     [/NoPack Name.RED] [/Fix Name ...] [/LoadDll Name.dll]
 
 - Start directly into a map (no main menu, no intro), at a start point and difficulty of your choice.
 - A "Load Map" button in the game menu (Esc) that loads any map under `Levels` (`/LoadMap`).
 - The developer switches still present in Zax.exe: debug log, frame rate, network graphs, the AIs' debug drawing, hidden parts, outlines, the developer cheats.
 - Leave packs out of a start: every `*.RED` next to Zax.exe (language packs, fix packs, mods) can be unticked on the start window's Packs page, or named with `/NoPack Name.RED` (repeatable). The files themselves are not renamed, moved or changed.
+- 18 fixes of bugs of the original game, each off unless asked for (`/Fix Name`, a **Fixes** page in the start window): e.g. no crash when the window is closed during a start movie, a shield that lets the damage above its charge through, a Psyonic Wave whose damage area no longer outlives a quick load, the aiming centre at 800 × 600, the sound channel choice remembered. Which bugs, how each is patched, which could not be done and the evidence from the game: [docs/FIXES.md](docs/FIXES.md).
 - Everything is off by default: without switches the game starts as without the launcher (start movies, main menu, no "Load Map" button); `/SkipMovies` is Zax.exe's own switch and is passed on like every other argument.
-- Without arguments a start window opens (map, start point, difficulty, resolution, switches, LAN game, packs); `/?` or `/help` shows the help.
+- Without arguments a start window opens (map, start point, difficulty, resolution, switches, LAN game, packs, fixes; the Fixes page ticks `DPlaySlot100`, the LAN join fix, by default); `/?` or `/help` shows the help.
 
 | | |
 |---|---|
 | ![The start window: map, start point, difficulty, resolution](docs/images/launcher-start.png) | ![The Developer page with the developer switches still in Zax.exe](docs/images/launcher-developer.png) |
 | The start window (`Zax-Launcher.exe` without arguments) | Its Developer page: the developer switches still in Zax.exe |
+
+![The Fixes page: one box per fix of the original's bugs](docs/images/launcher-fixes.png)
+
+*The Fixes page: the fixes of the original's bugs (`/Fix Name`, [docs/FIXES.md](docs/FIXES.md)).*
 
 ![The game menu (Esc) with the "Load Map" button](docs/images/launcher-game-menu.png)
 

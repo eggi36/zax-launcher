@@ -21,6 +21,8 @@
  *   /NoEntryDraw                no queue entry drawn in the dirty tiles (byte 0x6c1cf8)
  *   /NoPack Name.RED            leave that pack beside Zax.exe out when the game mounts its *.RED (repeatable);
  *                               the file itself is not touched
+ *   /Fix Name                   one of the fixes of the original's bugs (fixes.h, zax_fixes.h, docs/FIXES.md), e.g.
+ *                               /Fix ShieldOverflow; repeatable, /Fix:Name is the same
  * When the main menu is created for the first time (at the end of loading the game data,
  * App_LoadGameData 0x5a01c0 -> World_OpenMainMenu 0x59bab0), the DLL does what a click on a
  * difficulty does (Zax.exe 0x5bfbc1), only without the movie and with the selected map, in the
@@ -567,6 +569,8 @@ static void install_no_packs(void)
         log_line("Pack %s will be left out", g_no_pack[i]);
 }
 
+#include "zax_fixes.h"
+
 /* Replacement for the main menu constructor at all call sites. */
 static void *THISCALL main_menu_ctor(void *self, void *arg)
 {
@@ -708,6 +712,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
         set_draw_byte(ALT_DIRTY_DRAW, "Alternative dirty tile drawing");
     if (has_switch(cmd, "/NoEntryDraw"))
         set_draw_byte(NO_ENTRY_DRAW, "No queue entries in the dirty tiles");
+    install_fixes(cmd);
     if (!arg_value(cmd, "Map", g_map, sizeof g_map)) {
         log_line("No /Map given, game starts normally");
         return TRUE;
