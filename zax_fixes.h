@@ -601,18 +601,302 @@ static int fix_amplify_green(void)
     return 1;
 }
 
+/* ---- MenuBackground (ORIGINAL_BUGS 3.9): World_DrawFrame rescales the menu background when the width OR the height
+ * of the game's frame changed: the width test's "equal: skip" (0x4f2fb0) becomes "differs: rescale" (0x4f2fd8); an
+ * equal width falls through to the height test, which keeps its "equal: skip" --------------------------------------- */
+
+static int fix_menu_background(void)
+{
+    static const BYTE expect[] = {0x3b, 0xc8, 0x0f, 0x84, 0xce, 0x00, 0x00, 0x00};   /* 0x4f2fae: cmp ecx, eax; je 0x4f3084 */
+    static const BYTE height[] = {0x3b, 0xc8, 0x0f, 0x84, 0xac, 0x00, 0x00, 0x00};   /* 0x4f2fd0: cmp ecx, eax; je 0x4f3084 */
+    static const BYTE patch[] = {0x0f, 0x85, 0x22, 0x00, 0x00, 0x00};                 /* jne 0x4f2fd8 */
+    if (!code_is(CODE(0x4f2fae), expect, sizeof expect) || !code_is(CODE(0x4f2fd0), height, sizeof height))
+        return fix_mismatch(FIX_MENU_BACKGROUND);
+    write_code(CODE(0x4f2fb0), patch, sizeof patch);
+    return 1;
+}
+
+/* ---- OggToWav (ORIGINAL_BUGS 3.12): the music list's second test (0x4e20c3) compares the extension with ".ogg"
+ * (0x615660) instead of ".wav" again, so its branch (".wav" set, looked up) runs for a missing .ogg ----------------- */
+
+static int fix_ogg_to_wav(void)
+{
+    static const BYTE expect[] = {0x68, 0x58, 0x56, 0x61, 0x00, 0x8b, 0xce};   /* 0x4e20c3: push ".wav"; mov ecx, esi */
+    static const BYTE set_wav[] = {0xba, 0x58, 0x56, 0x61, 0x00};             /* 0x4e20fe: mov edx, ".wav" */
+    static const BYTE patch[] = {0x60};
+    if (!code_is(CODE(0x4e20c3), expect, sizeof expect) || !code_is(CODE(0x4e20fe), set_wav, sizeof set_wav) ||
+        lstrcmpA((const char *)0x615658, ".wav") != 0 || lstrcmpA((const char *)0x615660, ".ogg") != 0)
+        return fix_mismatch(FIX_OGG_TO_WAV);
+    write_code(CODE(0x4e20c4), patch, sizeof patch);
+    return 1;
+}
+
+/* ---- GoToAICross (ORIGINAL_BUGS 3.17): CGoToAI's debug drawing draws its second cross (two lines, 0x4d1a2a and
+ * 0x4d1a71) with the red colour it makes for it at 0x4d1a17 ([esp+0x34] there) instead of the yellow [esp+0x24] --- */
+
+static int fix_goto_ai_cross(void)
+{
+    static const BYTE red[] = {0x68, 0xff, 0x00, 0x00, 0x00, 0x6a, 0x00, 0x6a, 0x00, 0x68, 0xff, 0x00, 0x00, 0x00,
+                               0x8d, 0x4c, 0x24, 0x44};                                   /* 0x4d1a09: (255, 0, 0, 255) */
+    static const BYTE yellow[] = {0x8d, 0x44, 0x24, 0x24, 0x8b, 0x16, 0x50};             /* lea eax, [esp+0x24]; ...; push eax */
+    static const BYTE patch[] = {0x34};
+    if (!code_is(CODE(0x4d1a09), red, sizeof red) || !calls(CODE(0x4d1a1b), CODE(0x53f010)) ||
+        !code_is(CODE(0x4d1a2a), yellow, sizeof yellow) || !code_is(CODE(0x4d1a71), yellow, sizeof yellow))
+        return fix_mismatch(FIX_GOTO_AI_CROSS);
+    write_code(CODE(0x4d1a2d), patch, sizeof patch);
+    write_code(CODE(0x4d1a74), patch, sizeof patch);
+    return 1;
+}
+
+/* ---- ListenerCentre (ORIGINAL_BUGS 4.14): World::Frame 0x4f2620 sets the 3D sound listener to the view's top-left
+ * corner plus (320, 240) (the constants 0x5eff98/0x5eff9c, shared with other code). Its two fadds (0x4f2712, 0x4f2763)
+ * read the DLL's half view size instead, updated by a call in place of the fld before the first (0x4f270c): the view
+ * rectangle the world hands its layer (+0x2e4..+0x2f0), or the zoom frame (+0x2a4) when player 0's zoom (+0xd8) is not
+ * 1.0, as the port's [Fix] ListenerCentre ------------------------------------------------------------------------ */
+
+float g_listener_hx = 320.0f, g_listener_hy = 240.0f;
+static int g_listener_w = -1, g_listener_h = -1, g_listener_reports;
+
+typedef void *(THISCALL *object_fn)(void *self);
+typedef void *(THISCALL *object_arg_fn)(void *self, DWORD arg);
+void __cdecl listener_update(BYTE *world)
+{
+    BYTE *net = (BYTE *)((object_fn)(*(DWORD **)world)[0xb0 / 4])(world);
+    BYTE *p0 = net ? (BYTE *)((object_arg_fn)(*(DWORD **)net)[0x5c / 4])(net, 0) : NULL;
+    BYTE *zoom_frame = (BYTE *)rd((DWORD)world + 0x2a4);
+    int w, h;
+    if (p0 && rd((DWORD)p0 + 0xd8) != 0x3f800000 && zoom_frame) {
+        w = (int)((size_fn)(*(DWORD **)zoom_frame)[45])(zoom_frame);
+        h = (int)((size_fn)(*(DWORD **)zoom_frame)[39])(zoom_frame);
+    } else {
+        w = (int)(rd((DWORD)world + 0x2ec) - rd((DWORD)world + 0x2e4));
+        h = (int)(rd((DWORD)world + 0x2f0) - rd((DWORD)world + 0x2e8));
+    }
+    if ((w != g_listener_w || h != g_listener_h) && g_listener_reports < 20 && ++g_listener_reports)
+        log_line("Fix ListenerCentre: the view is %d x %d, the listener (%d, %d) from its top-left corner (the "
+                 "original: 320, 240)", w, h, w / 2, h / 2);
+    g_listener_w = w, g_listener_h = h;
+    g_listener_hx = (float)w / 2, g_listener_hy = (float)h / 2;
+}
+
+void listener_cave(void);
+__asm__(".globl _listener_cave\n"
+        "_listener_cave:\n"
+        "  pushal\n"
+        "  pushl %esi\n"                 /* esi: the world */
+        "  call _listener_update\n"
+        "  addl $4, %esp\n"
+        "  popal\n"
+        "  flds 0x80(%eax)\n"            /* the overwritten instruction: the view's x (eax: player 0's layer) */
+        "  ret\n");
+
+static int fix_listener_centre(void)
+{
+    static const BYTE x[] = {0xd9, 0x80, 0x80, 0x00, 0x00, 0x00, 0xd8, 0x05, 0x98, 0xff, 0x5e, 0x00};   /* 0x4f270c */
+    static const BYTE y[] = {0xd9, 0x80, 0x84, 0x00, 0x00, 0x00, 0xd8, 0x05, 0x9c, 0xff, 0x5e, 0x00};   /* 0x4f275d */
+    static const BYTE z[] = {0xc7, 0x44, 0x24, 0x1c, 0x00, 0x00, 0x20, 0xc1};                         /* 0x4f2775: -10 */
+    if (!code_is(CODE(0x4f270c), x, sizeof x) || !code_is(CODE(0x4f275d), y, sizeof y) ||
+        !code_is(CODE(0x4f2775), z, sizeof z) || !calls(CODE(0x4f278b), CODE(0x57c170)))
+        return fix_mismatch(FIX_LISTENER_CENTRE);
+    DWORD hx = (DWORD)&g_listener_hx, hy = (DWORD)&g_listener_hy;
+    branch_to(CODE(0x4f270c), 0xe8, listener_cave, 6);
+    write_code(CODE(0x4f2714), (const BYTE *)&hx, 4);   /* fadds [0x5eff98] -> half the view's width */
+    write_code(CODE(0x4f2765), (const BYTE *)&hy, 4);   /* fadds [0x5eff9c] -> half its height */
+    return 1;
+}
+
+/* ---- The hardening fixes: the same guards as the port's (its hardening group), each the smallest patch of the
+ * original that gives its result; logged where a cave sees the case (at most 5 lines each) ------------------------- */
+
+static int g_hardening_reports[FIXES];
+void __cdecl hardening_report(int fix, const char *what)
+{
+    if (fix >= 0 && fix < FIXES && g_hardening_reports[fix] < 5 && ++g_hardening_reports[fix])
+        log_line("Fix %s: %s", FIX[fix].name, what);
+}
+
+/* AmplifyEdges (ORIGINAL_BUGS 2.20): Amplify Light's two 16-bit edge row drawers (0x437c10 clipped, 0x437e10; fastcall,
+ * ret 0xc) call the edge span tables, which are 0 for Amplify Light; they now return at once, as the port's */
+static void __attribute__((fastcall)) amplify_edge_row(void *a, void *b, DWORD c, DWORD d, DWORD e)
+{
+    (void)a, (void)b, (void)c, (void)d, (void)e;
+    hardening_report(FIX_AMPLIFY_EDGES, "an Amplify Light sprite has an edge block: left out");
+}
+
+static int fix_amplify_edges(void)
+{
+    static const BYTE clipped[] = {0x53, 0x55, 0x56, 0x57, 0x8b, 0xf9, 0x8b, 0xea};               /* 0x437c10 */
+    static const BYTE row[] = {0x8b, 0x44, 0x24, 0x0c, 0x55, 0x8b, 0xea, 0x56};                   /* 0x437e10 */
+    static const BYTE ret[] = {0xc2, 0x0c, 0x00};                                                  /* 0x437d17, 0x437e97 */
+    if (!code_is(CODE(0x437c10), clipped, sizeof clipped) || !code_is(CODE(0x437e10), row, sizeof row) ||
+        !code_is(CODE(0x437d17), ret, sizeof ret) || !code_is(CODE(0x437e97), ret, sizeof ret))
+        return fix_mismatch(FIX_AMPLIFY_EDGES);
+    branch_to(CODE(0x437c10), 0xe9, (void *)amplify_edge_row, 5);
+    branch_to(CODE(0x437e10), 0xe9, (void *)amplify_edge_row, 5);
+    return 1;
+}
+
+/* GlyphRange (ORIGINAL_BUGS 2.23): the three measuring bounds (CFont::CharWidth 0x4a62a8, DrawText's fixed width
+ * 0x4a6499: jbe -> jb; TextBottom 0x4a6c16: ja -> jae) take last - first instead of last - first + 1, so a character
+ * one past the font's last measures as glyph 0 */
+static int fix_glyph_range(void)
+{
+    static const BYTE width[] = {0x46, 0x3b, 0xc6, 0x5e, 0x76, 0x02, 0x33, 0xc0};   /* 0x4a62a4: inc esi; cmp; pop; jbe */
+    static const BYTE fixed[] = {0x42, 0x3b, 0xc2, 0x76, 0x02, 0x33, 0xc0};         /* 0x4a6496: inc edx; cmp; jbe */
+    static const BYTE bottom[] = {0x42, 0x3b, 0xc2, 0x77, 0x04, 0x2b, 0xc1};        /* 0x4a6c13: inc edx; cmp; ja */
+    static const BYTE jb[] = {0x72}, jae[] = {0x73};
+    if (!code_is(CODE(0x4a62a4), width, sizeof width) || !code_is(CODE(0x4a6496), fixed, sizeof fixed) ||
+        !code_is(CODE(0x4a6c13), bottom, sizeof bottom))
+        return fix_mismatch(FIX_GLYPH_RANGE);
+    write_code(CODE(0x4a62a8), jb, 1);
+    write_code(CODE(0x4a6499), jb, 1);
+    write_code(CODE(0x4a6c16), jae, 1);
+    return 1;
+}
+
+/* BeamParts (ORIGINAL_BUGS 2.33): the light beam's touch handler, for a part that is no CEntityBase (or none), ends
+ * (jmp 0x4fe673, its epilogue) instead of going on with esi 0 */
+static int fix_beam_parts(void)
+{
+    static const BYTE expect[] = {0x75, 0x02, 0x33, 0xf6, 0x8b, 0x43, 0x14};   /* 0x4fe626: jne; xor esi, esi */
+    static const BYTE end[] = {0x5e, 0x5d, 0x5f, 0x5b, 0xc2, 0x14, 0x00};      /* 0x4fe673 */
+    static const BYTE patch[] = {0xeb, 0x49};                                  /* jmp 0x4fe673 */
+    if (!code_is(CODE(0x4fe626), expect, sizeof expect) || !code_is(CODE(0x4fe673), end, sizeof end))
+        return fix_mismatch(FIX_BEAM_PARTS);
+    write_code(CODE(0x4fe628), patch, sizeof patch);
+    return 1;
+}
+
+/* ItemData (ORIGINAL_BUGS 2.34), its projectile part: the two projectile value readers' "no projectile" paths
+ * (0x4d63fa +0x24, 0x4d650a +0x30) load 0.0 (fldz) instead of reading through address 0 */
+static int fix_item_data(void)
+{
+    static const BYTE f24[] = {0x33, 0xc0, 0x5e, 0xd9, 0x40, 0x24, 0x81, 0xc4, 0x00, 0x01, 0x00, 0x00, 0xc3};   /* 0x4d63f7 */
+    static const BYTE f30[] = {0x33, 0xc0, 0x5e, 0xd9, 0x40, 0x30, 0x81, 0xc4, 0x00, 0x01, 0x00, 0x00, 0xc3};   /* 0x4d6507 */
+    static const BYTE fldz[] = {0xd9, 0xee, 0x90};
+    if (!code_is(CODE(0x4d63f7), f24, sizeof f24) || !code_is(CODE(0x4d6507), f30, sizeof f30))
+        return fix_mismatch(FIX_ITEM_DATA);
+    write_code(CODE(0x4d63fa), fldz, sizeof fldz);
+    write_code(CODE(0x4d650a), fldz, sizeof fldz);
+    return 1;
+}
+
+/* EmptyLists (ORIGINAL_BUGS 2.11): CSegmentedInventoryDetailRenderer::CompletedItem 0x56a6b0 reads +0x1c of address 0
+ * without catalogue records (0x56a6c1) or for a record being loaded (0x56a6df), and of a record whose object did not
+ * load (0x56a798). The two jumps go to a cave, the record's load to another; both end in the function's own report
+ * "not a CInventoryItem" (0x56a7b8), which gives no item */
+DWORD g_empty_report, g_empty_on;
+void __cdecl empty_lists_none(void)
+{
+    hardening_report(FIX_EMPTY_LISTS, "the segmented renderer's \"Completed Item\" has no catalogue record: no item");
+}
+void __cdecl empty_lists_object(void)
+{
+    hardening_report(FIX_EMPTY_LISTS, "the segmented renderer's \"Completed Item\" record has no object: no item");
+}
+void empty_lists_none_cave(void);
+__asm__(".globl _empty_lists_none_cave\n"
+        "_empty_lists_none_cave:\n"
+        "  pushal\n"
+        "  call _empty_lists_none\n"
+        "  popal\n"
+        "  jmp *_g_empty_report\n");
+void empty_lists_record_cave(void);
+__asm__(".globl _empty_lists_record_cave\n"
+        "_empty_lists_record_cave:\n"
+        "  movl 0x78(%esi,%eax), %eax\n"   /* the overwritten instruction: the record's object */
+        "  testl %eax, %eax\n"
+        "  jz 1f\n"
+        "  jmp *_g_empty_on\n"
+        "1:\n"
+        "  pushal\n"
+        "  call _empty_lists_object\n"
+        "  popal\n"
+        "  jmp *_g_empty_report\n");
+
+static void jcc_to(DWORD site, const void *target)   /* a jcc rel32 (0f 8x) at site goes to target */
+{
+    INT32 rel = (INT32)((DWORD)target - (site + 6));
+    write_code(site + 2, (const BYTE *)&rel, 4);
+}
+
+static int fix_empty_lists(void)
+{
+    static const BYTE none[] = {0x0f, 0x84, 0xd7, 0x00, 0x00, 0x00};       /* 0x56a6c1: je 0x56a79e */
+    static const BYTE loading[] = {0x0f, 0x85, 0xb9, 0x00, 0x00, 0x00};    /* 0x56a6df: jne 0x56a79e */
+    static const BYTE record[] = {0x8b, 0x44, 0x06, 0x78, 0xeb, 0x02, 0x33, 0xc0, 0x8b, 0x70, 0x1c};   /* 0x56a798 */
+    static const BYTE report[] = {0x8b, 0x0d, 0xcc, 0x02, 0x6c, 0x00, 0x68, 0xa4, 0x14, 0x62, 0x00, 0x33, 0xf6};   /* 0x56a7b8 */
+    if (!code_is(CODE(0x56a6c1), none, sizeof none) || !code_is(CODE(0x56a6df), loading, sizeof loading) ||
+        !code_is(CODE(0x56a798), record, sizeof record) || !code_is(CODE(0x56a7b8), report, sizeof report))
+        return fix_mismatch(FIX_EMPTY_LISTS);
+    g_empty_report = CODE(0x56a7b8);
+    g_empty_on = CODE(0x56a7a0);
+    jcc_to(CODE(0x56a6c1), empty_lists_none_cave);
+    jcc_to(CODE(0x56a6df), empty_lists_none_cave);
+    branch_to(CODE(0x56a798), 0xe9, empty_lists_record_cave, 6);
+    return 1;
+}
+
+/* RleGetColor (ORIGINAL_BUGS 3.6): CFrame::GetColor's two 16-bit red masks (0x4aaed0, 0x4ab0d7) keep 0xf8 instead of
+ * 0xfffff8: the same for a 5-6-5 pixel, and the RLE branch's "drawn" value -1 gives white instead of an index far past
+ * the colour table, as the port's */
+static int fix_rle_get_color(void)
+{
+    static const BYTE mask[] = {0x25, 0xf8, 0xff, 0xff, 0x00, 0x52, 0x50};   /* and eax, 0xfffff8; push edx; push eax */
+    static const BYTE patch[] = {0xf8, 0x00, 0x00};
+    if (!code_is(CODE(0x4aaed0), mask, sizeof mask) || !code_is(CODE(0x4ab0d7), mask, sizeof mask) ||
+        !calls(CODE(0x4aaed7), CODE(0x53f080)) || !calls(CODE(0x4ab0de), CODE(0x53f080)))
+        return fix_mismatch(FIX_RLE_GET_COLOR);
+    write_code(CODE(0x4aaed1), patch, sizeof patch);
+    write_code(CODE(0x4ab0d8), patch, sizeof patch);
+    return 1;
+}
+
+/* OffsetGetColor (ORIGINAL_BUGS 3.5): COffsetFrame::GetColor 0x525230 (x, y, colour), rewritten in place: it passes
+ * (x - dx, y - dy, colour) to its target's slot 53 instead of (x - dx, y, colour - dy * 16) */
+static int fix_offset_get_color(void)
+{
+    static const BYTE expect[] = {0x8b, 0x41, 0x10, 0x56, 0x8b, 0x71, 0x0c, 0x8b, 0x49, 0x08, 0xc1, 0xe0, 0x04, 0x8b, 0xd0,
+                                  0x8b, 0x44, 0x24, 0x10, 0x2b, 0xc2, 0x8b, 0x54, 0x24, 0x08, 0x50, 0x8b, 0x44, 0x24, 0x10,
+                                  0x2b, 0xd6, 0x8b, 0x31, 0x50, 0x52, 0xff, 0x96, 0xd4, 0x00, 0x00, 0x00, 0x5e, 0xc2, 0x0c,
+                                  0x00};                                                                    /* 0x525230 */
+    static const BYTE patch[42] = {
+        0x8b, 0x41, 0x10,              /* mov eax, [ecx+0x10]   dy */
+        0x56,                          /* push esi */
+        0x8b, 0x71, 0x0c,              /* mov esi, [ecx+0xc]    dx */
+        0x8b, 0x49, 0x08,              /* mov ecx, [ecx+8]      the target */
+        0x8b, 0x54, 0x24, 0x10,        /* mov edx, [esp+0x10]   the colour */
+        0x52,                          /* push edx */
+        0x8b, 0x54, 0x24, 0x10,        /* mov edx, [esp+0x10]   y */
+        0x2b, 0xd0,                    /* sub edx, eax */
+        0x52,                          /* push edx */
+        0x8b, 0x54, 0x24, 0x10,        /* mov edx, [esp+0x10]   x */
+        0x2b, 0xd6,                    /* sub edx, esi */
+        0x52,                          /* push edx */
+        0x8b, 0x31,                    /* mov esi, [ecx] */
+        0xff, 0x96, 0xd4, 0x00, 0x00, 0x00,   /* call [esi+0xd4]: slot 53 */
+        0x90, 0x90, 0x90, 0x90, 0x90,  /* up to the original's pop esi; ret 0xc at 0x52525a */
+    };
+    if (!code_is(CODE(0x525230), expect, sizeof expect))
+        return fix_mismatch(FIX_OFFSET_GET_COLOR);
+    write_code(CODE(0x525230), patch, sizeof patch);
+    return 1;
+}
+
 /* ---- The switches -------------------------------------------------------------------------------------------- */
 
 static int (*const FIX_INSTALL[FIXES])(void) = {
     fix_multiplayer_cfg, fix_disable_minimap, fix_sound_channels, fix_play_once_after_load, fix_draw_hud_crash,
     fix_companion_spot, fix_smooth_turning, fix_shield_overflow, fix_pickup_refused, fix_use_items,
     fix_old_patrol_seed, fix_fidget_next, fix_dplay_slot100, fix_aim_centre, fix_no_write_back, fix_quit_during_movie,
-    fix_ground_blend, fix_amplify_green,
+    fix_ground_blend, fix_amplify_green, fix_menu_background, fix_ogg_to_wav, fix_goto_ai_cross, fix_listener_centre,
+    fix_amplify_edges, fix_glyph_range, fix_beam_parts, fix_item_data, fix_empty_lists, fix_rle_get_color,
+    fix_offset_get_color,
 };
 
 static void install_fixes(const char *cmd)
 {
     for (int i = 0; i < FIXES; i++)
-        if (has_fix(cmd, FIX[i].name) && FIX_INSTALL[i]())
+        if (fix_on(cmd, i) && FIX_INSTALL[i]())
             log_line("Fix %s enabled", FIX[i].name);
 }

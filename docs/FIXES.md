@@ -6,6 +6,11 @@ its developer switches; Zax.exe on disk is not touched. Each fix has a switch of
 `Zax-Launcher.ini`. All are off unless given; the start window ticks `DPlaySlot100` by default (as the port's launcher
 does), a bare command line gets none. Without a `/Fix` switch the DLL changes no byte for them.
 
+The **hardening** fixes (the last seven in the table) guard against crashes on unusual or modded data; the shipped game
+reaches none of them. As in the port they form a group: `/Fix Hardening` turns on all of them (each still has its own
+switch), and the Fixes page shows a three-state "Hardening" box below the other fixes, with a button that shows its
+fixes one by one in their place; the window writes `/Fix Hardening` when all are ticked.
+
 The fixes follow the port (zax-redone, its `[Fix]` switches; the bugs, their addresses and evidence are in its
 `docs/ORIGINAL_BUGS.md`, cited below as "OB"). The port reimplements the code; the launcher can only change a few bytes
 of the original or send a short piece of it into the DLL ("cave") and back. So each fix here is a small patch of the
@@ -13,7 +18,7 @@ original's code that gives the port's result, not the port's code.
 
 Every patch compares the original bytes at its sites first and stays off (a line in `Zax-Launcher.log`) when they
 differ. Builds 1308 and 1309: all sites of the table lie below `0x59fc70` and have the same bytes in both (compared
-byte for byte); only DrawHudCrash differs, because 1309 has that test already. Every enabled fix writes
+byte for byte, for the batch NF-L rows on 2026-11-17 too); only DrawHudCrash differs, because 1309 has that test already. Every enabled fix writes
 `Fix <Name> enabled` into `Zax-Launcher.log`; some log what they did (named in the table).
 
 ## Survey: what can be done in the original exe
@@ -41,11 +46,46 @@ possible in the original exe.
 | QuitDuringMovie | 1.21 | S | `App_Dtor` `0x4cdcc0`: its `Zip_UnmountAll` call (`0x4cdcca`) goes to a DLL function that first closes every open movie of the Bink system `0x62eaf0` with `CloseMovie` `0x432080`; logs each | yes |
 | GroundBlend | 1.1 | S | the plasma ground's 16-bit loop of `CPlasmaTileMap` (`0x541519`–`0x5415f0`): a cave at `0x541541` blends the two texture pixels with the port's rounded formula (`fix_blend565`) and stores the result as the original does | yes |
 | AmplifyGreen | 1.3 | M | the two 16-bit Amplify Light spans `0x434280` (literal) and `0x434310` (fill) are replaced by DLL functions: red and blue from the game's own tables, green with its six bits (the port's `amplify565`) | yes |
+| MenuBackground | 3.9 | S | `World_DrawFrame`: the width test's `je 0x4f3084` (`0x4f2fb0`, equal: skip) becomes `jne 0x4f2fd8` (differs: rescale); an equal width falls through to the height test, which keeps its skip | yes |
+| OggToWav | 3.12 | S | the music list's second extension test `push 0x615658` (".wav", `0x4e20c3`) takes `0x615660` (".ogg"), so its branch (".wav" set, looked up, `0x4e20fe`) runs for a missing .ogg (one byte, `0x4e20c4`) | yes |
+| GoToAICross | 3.17 | S | `CGoToAI`'s debug drawing: the two lines of its second cross (`lea eax, [esp+0x24]` at `0x4d1a2a`, `0x4d1a71`) take the red colour made at `0x4d1a17` (`[esp+0x34]`) instead of the yellow (one byte each) | yes |
+| ListenerCentre | 4.14 | S | `World::Frame` `0x4f2620`: the two `fadd`s of the listener (`0x4f2712`, `0x4f2763`) read the DLL's half view size instead of 320/240 (the constants `0x5eff98`/`0x5eff9c` stay, other code shares them); a call in place of the `fld` at `0x4f270c` updates it every frame: the view rectangle the world hands its layer (`+0x2e4`..`+0x2f0`), or the zoom frame `+0x2a4` when player 0's zoom `+0xd8` is not 1.0, as the port; logs the view when it changes | yes |
+| AmplifyEdges (hardening) | 2.20 | S | Amplify Light's two 16-bit edge row drawers `0x437c10`, `0x437e10` (fastcall, `ret 0xc`) go to a DLL function that returns at once (their span tables are 0); logs the first five | yes |
+| GlyphRange (hardening) | 2.23 | S | the measuring bounds: `0x4a62a8` and `0x4a6499` `jbe` → `jb`, `0x4a6c16` `ja` → `jae` (last − first instead of last − first + 1) | yes |
+| BeamParts (hardening) | 2.33 | S | the light beam's touch handler: `xor esi, esi` (`0x4fe628`, a part that is no `CEntityBase`) becomes `jmp 0x4fe673` (its epilogue) | yes |
+| ItemData (hardening) | 2.34 | S, part | only the projectile part: the two projectile value readers' null paths (`0x4d63fa`, `0x4d650a`, `fld [eax+…]` after `xor eax, eax`) load 0.0 (`fldz`). The port's switch also covers the HUD's sequences and icons, the compass's render data and `GiveItemsToPlayers` (2.17): several caves (M), not built | part |
+| EmptyLists (hardening) | 2.11 | S + M | `CSegmentedInventoryDetailRenderer::CompletedItem` `0x56a6b0`: its two jumps to the null path (`0x56a6c1` no records, `0x56a6df` a record being loaded) go to a cave, and a cave at `0x56a798` catches a record whose object is 0; both end in the function's own report (`0x56a7b8`, "not a CInventoryItem", no item); logs each case (at most five lines). The port's entry names no other site | yes |
+| RleGetColor (hardening) | 3.6 | S | `CFrame::GetColor`'s two 16-bit red masks `and eax, 0xfffff8` (`0x4aaed0`, `0x4ab0d7`) → `and eax, 0xf8`: the same for a 5-6-5 pixel; the RLE branch's "drawn" −1 gives white (as the port) instead of an index far past the colour table | yes |
+| OffsetGetColor (hardening) | 3.5 | S | `COffsetFrame::GetColor` `0x525230` rewritten in place (42 bytes): (x − dx, y − dy, colour) to its target's slot 53 instead of (x − dx, y, colour − dy · 16) | yes |
 | EdgeBlend | 1.2 | N | the blend is inlined in about 240 span functions (the unrolled 16-bit alpha and opacity spans for each width, their MMX versions, the Copy blitters); each would need its own replacement: that is the port's renderer, not a patch | no |
 | GroundTgaAppend | 2.26 | N | needs the port's `GroundTga` (its own TGA reader for ground textures, a hardening switch) and a rebuilt ground texture list: a reimplemented subsystem, not a patch | no |
 | Hardening | group 2 | N | about 30 guards across the parser, the models, the files and the network code, many inside reimplemented functions; matters only for modded or broken data | no |
 
-18 of the 21 are done; the three left need the port.
+Of the port's fixes before batch NF-1, 18 of 21 are done; the three left need the port. Of the switches batches NF-1,
+NF-2 and listener added (zax-redone `runs/nf1/launcher_list.md`, `runs/nf2/launcher_list.md`, its `docs/STEP3_PLAN.md`),
+the eleven byte patches (S) are done, ItemData for its projectile part only; EmptyLists got its second case as a small
+cave too. The others are left out:
+
+| Switch | OB | Kind | Why not in the launcher |
+|---|---|---|---|
+| ItemData (HUD, give) | 2.17, 2.34 | M | several caves in the HUD renderers (compass, ammunition icon, item icons) and `GiveItemsToPlayers` `0x5a26f0`; the port found none reached by data it could make |
+| MeterClip | 2.18 | M | a clamp after each `ftol` of `EnergyMeter_Draw` `0x486d10`; the game already clamps the values it gives the meter (the port's test: not reached) |
+| ZeroBytes | 4.5 | M | two caves for bytes of written frame files and colours; changes no picture, nothing to protect |
+| StackValues | 4.6 | M | three caves, one needing a longer encoding of a stack operand; garbage that the game does not use visibly |
+| EmptyNames | 2.10 | M | two caves after slot 1 calls that never give a null name (the port's test: not reached) |
+| TempFileFields | 2.9 | M | save games only; two caves |
+| Leaks | 4.2 | M | five caves to free memory on rare error paths; a leak on a path no play reaches is not worth five patches |
+| BindingText | 4.12 | M | not reachable with the game's key names |
+| LineOrigin, InvertedRects, TileBounds | 3.4, 3.7, 3.8 | M | caves in the frame code's hot drawing functions (FillRect, ClearRect, TintRect, the tile loops) for cases the game's code never passes |
+| PlayerLayer | 3.11 | M | a null test inside `World_SetViewTarget` and the listener; only without player 0's layer, which the game always has in play |
+| MapCacheFlush, FormatSpecs, SceneCopies, NetEdges | 3.19, 3.20, 3.22, 3.18 | M | several caves each (the format switch's cases, a loop zeroing old scenes, five network edge cases); dormant, the port's self tests were needed to reach them at all |
+| FillNoMmx | 3.2 | N | every CPU the original runs on has MMX |
+| MessageLines | 3.14 | N | no caller passes an empty list |
+
+ListenerCentre in the original: its views are the game frame minus the panel, 800 × 544 at 800 × 600 (the listener
+moves 80 pixels right and 32 down, to the view's middle) and 640 × 424 at 640 × 480 (it moves 28 pixels down; the
+original's (320, 240) is the middle of no view the game has). When player 0's zoom is not 1.0 the listener follows the zoom frame, as in the port (not seen in
+these tests: their zoom was 1.0). Which sounds are within hearing follows the listener, so distant sounds can change.
 
 ## Evidence
 
@@ -80,3 +120,36 @@ fixes outside the area of Zax's idle animation, which differs between any two ru
 
 The start window: the **Fixes** page with the 18 boxes and their tooltips, `DPlaySlot100` ticked by default, the
 shortcut target `/Fix DPlaySlot100` (`-223718-2f0e`).
+
+### The eleven of batch NF-L (2026-11-17)
+
+Windows VMs of two platforms (A and B), `vmtest.py --launcher --cleanup`, `/Original`, the
+original Zax.exe build 1308 at 800 × 600 × 16 unless named; `Act 1/M1M2/01 Main`, 30 s after the start, then walked
+four seconds. Job ids `-hhmmss-xxxx` short for `20261117-hhmmss-…`.
+
+| Fix | Platform A | Platform B | What the log and the game show |
+|---|---|---|---|
+| MenuBackground | `-064307-bc80` | `-064922-cca3` | "enabled", the game runs. Not visible in the original: its two sizes change both dimensions, so the original already rescales; no shot |
+| OggToWav | `-064642-98c4` | `-064922-8e68` | "enabled", the game runs; the original's data names no missing .ogg, so the branch is not reached [assumption: from the code and the port's test, which needed a pack of its own] |
+| GoToAICross | `-064655-1c49` | `-064922-226f` | "enabled"; with `/DebugDraw` (`-064358-44e7` / `-064922-2b6e`, without the fix `-064619-c111` / `-064921-7206`) no GoTo AI draws its second cross in this level, as in the port's six debug drawing plays: not seen on a screen |
+| ListenerCentre | `-064511-9b1c` | `-064748-7a2c` | "the view is 800 x 544, the listener (400, 272) from its top-left corner (the original: 320, 240)"; at 640 × 480 (all fixes, `-064648-181c` / `-064922-549f`) "the view is 640 x 424, the listener (320, 212)". Not listened to (no sound output on these VMs) |
+| AmplifyEdges | `-064407-c490` | `-064922-bab5` | "enabled"; no line of an edge block: the level's Amplify Light sprites have none |
+| GlyphRange | `-064443-0e0d` | `-064922-83e8` | "enabled", the game runs, the opening dialogue drawn |
+| BeamParts | `-064319-c9c1` | `-064922-2e1d` | "enabled" |
+| ItemData | `-064307-fb09` | `-064922-6cfb` | "enabled" |
+| EmptyLists | `-064443-959d` | `-064922-960c` | "enabled"; no line: the level reaches neither case |
+| RleGetColor | `-064643-99dd` | `-064748-92e8` | "enabled" |
+| OffsetGetColor | `-064615-dd5e` | `-064922-3a97` | "enabled" |
+
+The hardening fixes guard cases the shipped game does not reach (as in the port, whose tests reached only AmplifyEdges'
+drawers, with its own data); here they were installed and played, their effect is confirmed by the code, not seen.
+
+All 29 at once (the 22 by name and `/Fix Hardening`): 29 times "enabled", the game runs and the logs above (A
+`-064534-51a2`, B `-064436-84af`; 640 × 480 × 16 `-064648-181c`, `-064922-549f`; build 1309, the Polish Zax.exe in
+the same folder, `-064345-ed9a`, `-064922-e913`: 29 enabled, DrawHudCrash "has the test already"). The final build:
+all 29 again (A `-065620-9f7a`, B `-065715-6506`), no switch `-065715-910c`. Without any switch: the intro movie at 640 × 480, then the main menu, no fix line in the log (A
+`-064611-5652`, B `-064651-0f4b`).
+
+The start window (platform B): the Fixes page as in the README's picture, `/Fix Hardening` on the shortcut target when all
+seven are ticked; "Show them" shows the seven in place of the fixes, a click on the Hardening box unticks all seven (the
+target loses `/Fix Hardening`), "Back to the fixes" returns (`-065501-744c`).

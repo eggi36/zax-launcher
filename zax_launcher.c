@@ -133,6 +133,18 @@ static const char HELP[] =
     "    QuitDuringMovie    no crash when closing during a movie\n"
     "    GroundBlend        smoother 16-bit plasma ground\n"
     "    AmplifyGreen       exact green in Amplify Light (16-bit)\n"
+    "    MenuBackground     menu background follows any new size\n"
+    "    OggToWav           missing .ogg music falls back to .wav (mods)\n"
+    "    GoToAICross        debug drawing: GoTo AI's target cross red\n"
+    "    ListenerCentre     3D sound heard from the view's centre\n"
+    "    Hardening          all of the following (modded or broken data):\n"
+    "    AmplifyEdges       Amplify Light soft edges\n"
+    "    GlyphRange         characters past a font's end\n"
+    "    BeamParts          light beams on odd parts\n"
+    "    ItemData           projectiles without their data\n"
+    "    EmptyLists         item lists without records\n"
+    "    RleGetColor        colour reads of RLE frames\n"
+    "    OffsetGetColor     offset frame colour reads\n"
     "    Some change how the game plays (CompanionSpot, SmoothTurning,\n"
     "    ShieldOverflow, OldPatrolSeed); the tooltips of the Fixes page and\n"
     "    docs/FIXES.md say what each does.\n"
@@ -463,6 +475,7 @@ enum {
     ID_NOENTRY, ID_CMDLINE, ID_HELP, ID_TABS,
     ID_SINGLE, ID_HOST, ID_JOIN, ID_NAME, ID_ADDRESS,
     ID_PACKS = 300, ID_PACKS_ALL, ID_PACKS_NOTE,
+    ID_HARDENING = 390, ID_HARDENING_LIST,   /* the hardening group's box and the button that shows its fixes */
     ID_FIX = 400   /* ID_FIX + i: the box of FIX[i] (fixes.h) */
 };
 static const char *const LAN_MODE[] = {"Off", "Host", "Join"};
@@ -487,12 +500,14 @@ static HWND g_wnd;
 /* The start window's tabs (so it fits a 640 x 480 desktop); the controls are children of the window itself, each
  * on one page (PAGE_ALL: below the tabs), shown or hidden when the tab changes */
 enum { PAGE_START, PAGE_LAN, PAGE_DEVELOPER, PAGE_PACKS, PAGE_FIXES, PAGES, PAGE_ALL = -1 };
+/* The Fixes page shows one of two lists below its text: the fixes, or the hardening fixes (g_hardening_shown) */
+enum { PAGE_FIXES_OWN = PAGES, PAGE_FIXES_HARDENING };
 static const char *const PAGE_NAME[PAGES] = {"Start", "LAN game", "Developer", "Packs", "Fixes"};
 static struct {
     HWND wnd;
     int page;
-} g_controls[128];
-static int g_control_count, g_build_page = PAGE_ALL, g_page;
+} g_controls[160];
+static int g_control_count, g_build_page = PAGE_ALL, g_page, g_hardening_shown;
 
 static char g_dir[MAX_PATH], g_ini[MAX_PATH + 16], g_rules_spawn[256];
 static char g_pool[256 * 1024];
@@ -884,11 +899,42 @@ static void save_packs(void)
 
 static HWND add(DWORD ex, const char *cls, const char *text, DWORD style, int x, int y, int w, int h, int id);
 
+static int hardening_ticked(void)   /* how many of the hardening fixes are ticked */
+{
+    int n = 0;
+    for (int i = FIX_FIRST_HARDENING; i < FIXES; i++)
+        n += checked(ID_FIX + i);
+    return n;
+}
+
+/* The group's box: ticked when all its fixes are, grey when some are */
+static void sync_hardening(void)
+{
+    const int n = hardening_ticked();
+    SendMessageA(item(ID_HARDENING), BM_SETCHECK, n == FIXES - FIX_FIRST_HARDENING ? BST_CHECKED : n ? BST_INDETERMINATE
+                                                                                                  : BST_UNCHECKED, 0);
+}
+
+/* A click on the group's box ticks all its fixes, or unticks them when all were ticked */
+static void click_hardening(void)
+{
+    const int all = hardening_ticked() == FIXES - FIX_FIRST_HARDENING;
+    for (int i = FIX_FIRST_HARDENING; i < FIXES; i++)
+        SendMessageA(item(ID_FIX + i), BM_SETCHECK, all ? BST_UNCHECKED : BST_CHECKED, 0);
+    sync_hardening();
+}
+
 static void fixes_args(void)
 {
-    for (int i = 0; i < FIXES; i++)
+    for (int i = 0; i < FIX_FIRST_HARDENING; i++)
         if (checked(ID_FIX + i))
             add_arg("/Fix %s", FIX[i].name);
+    if (hardening_ticked() == FIXES - FIX_FIRST_HARDENING)
+        add_arg("/Fix %s", FIX_HARDENING);
+    else
+        for (int i = FIX_FIRST_HARDENING; i < FIXES; i++)
+            if (checked(ID_FIX + i))
+                add_arg("/Fix %s", FIX[i].name);
 }
 
 static void save_fixes(void)
@@ -897,19 +943,30 @@ static void save_fixes(void)
         WritePrivateProfileStringA("Fixes", FIX[i].name, checked(ID_FIX + i) ? "1" : "0", g_ini);
 }
 
-/* Built on its own page; the boxes in two columns, each ticked as remembered or by its default */
+/* Built on its own page: the fixes in two columns, below them the Hardening box and the button that shows the
+ * hardening fixes in the fixes' place (two columns too); each box ticked as remembered or by its default */
 static void create_fixes_page(void)
 {
     g_build_page = PAGE_FIXES;
     add(0, "STATIC", "Fixes of bugs of the original game, made in the running Zax.exe (/Fix). Unticked: as the "
                      "original.", 0, 20, 40, 556, 16, -1);
+    const int own_rows = (FIX_FIRST_HARDENING + 1) / 2, hard_rows = (FIXES - FIX_FIRST_HARDENING + 1) / 2;
     for (int i = 0; i < FIXES; i++) {
-        const int column = i / ((FIXES + 1) / 2), row = i % ((FIXES + 1) / 2);
-        HWND box = add(0, "BUTTON", FIX[i].label, WS_TABSTOP | BS_AUTOCHECKBOX, 20 + 282 * column, 62 + 22 * row, 276, 18,
-                       ID_FIX + i);
+        const int hard = i >= FIX_FIRST_HARDENING, k = hard ? i - FIX_FIRST_HARDENING : i, rows = hard ? hard_rows : own_rows;
+        g_build_page = hard ? PAGE_FIXES_HARDENING : PAGE_FIXES_OWN;
+        HWND box = add(0, "BUTTON", FIX[i].label, WS_TABSTOP | BS_AUTOCHECKBOX, 20 + 282 * (k / rows), 60 + 20 * (k % rows),
+                       276, 18, ID_FIX + i);
         const int on = (int)GetPrivateProfileIntA("Fixes", FIX[i].name, FIX[i].on_in_window, g_ini);
         SendMessageA(box, BM_SETCHECK, on ? BST_CHECKED : BST_UNCHECKED, 0);
     }
+    g_build_page = PAGE_FIXES_HARDENING;
+    add(0, "STATIC", "These guard against crashes on unusual or modded data; the shipped game reaches none of them. "
+                     "Each one also has its own switch (/Fix Name); the box below ticks or unticks them all.",
+        0, 20, 64 + 20 * hard_rows, 556, 32, -1);
+    g_build_page = PAGE_FIXES;
+    add(0, "BUTTON", HARDENING_LABEL, WS_TABSTOP | BS_3STATE, 20, 292, 400, 20, ID_HARDENING);
+    add(0, "BUTTON", "Show them", WS_TABSTOP, 452, 290, 124, 24, ID_HARDENING_LIST);
+    sync_hardening();
 }
 
 static void add_fix_tooltips(HWND tip)
@@ -922,6 +979,23 @@ static void add_fix_tooltips(HWND tip)
         ti.hwnd = g_wnd;
         ti.uId = (UINT_PTR)item(ID_FIX + i);
         ti.lpszText = (LPSTR)FIX[i].tip;
+        SendMessageA(tip, TTM_ADDTOOLA, 0, (LPARAM)&ti);
+    }
+    static const struct {
+        int id;
+        const char *text;
+    } GROUP[] = {
+        {ID_HARDENING, HARDENING_TIP},
+        {ID_HARDENING_LIST, "Shows the hardening fixes one by one in place of the other fixes, and back."},
+    };
+    for (unsigned i = 0; i < sizeof GROUP / sizeof *GROUP; i++) {
+        TTTOOLINFOA ti;
+        memset(&ti, 0, sizeof ti);
+        ti.cbSize = TTTOOLINFOA_V2_SIZE;
+        ti.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
+        ti.hwnd = g_wnd;
+        ti.uId = (UINT_PTR)item(GROUP[i].id);
+        ti.lpszText = (LPSTR)GROUP[i].text;
         SendMessageA(tip, TTM_ADDTOOLA, 0, (LPARAM)&ti);
     }
 }
@@ -1080,9 +1154,13 @@ static void show_page(int page)
 {
     g_page = page;
     SendMessageA(item(ID_TABS), TCM_SETCURSEL, (WPARAM)page, 0);
+    const int fixes_list = page != PAGE_FIXES ? -2 : g_hardening_shown ? PAGE_FIXES_HARDENING : PAGE_FIXES_OWN;
     for (int i = 0; i < g_control_count; i++)
         if (g_controls[i].page != PAGE_ALL)
-            ShowWindow(g_controls[i].wnd, g_controls[i].page == page ? SW_SHOW : SW_HIDE);
+            ShowWindow(g_controls[i].wnd,
+                       g_controls[i].page == page || g_controls[i].page == fixes_list ? SW_SHOW : SW_HIDE);
+    if (page == PAGE_FIXES)
+        SetWindowTextA(item(ID_HARDENING_LIST), g_hardening_shown ? "Back to the fixes" : "Show them");
 }
 
 /* The Packs page: a list with a check box per pack in load order, its size, and "Tick all" */
@@ -1354,6 +1432,14 @@ static LRESULT CALLBACK wnd_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
         if (id == ID_PACKS_ALL)
             for (int i = 0; i < g_pack_count; i++)
                 ListView_SetCheckState(item(ID_PACKS), i, TRUE);
+        if (id == ID_HARDENING && code == BN_CLICKED)
+            click_hardening();
+        if (id >= ID_FIX + FIX_FIRST_HARDENING && id < ID_FIX + FIXES)
+            sync_hardening();
+        if (id == ID_HARDENING_LIST) {
+            g_hardening_shown = !g_hardening_shown;
+            show_page(PAGE_FIXES);
+        }
         if (id != ID_CMDLINE)
             build_args();
         return 0;
