@@ -9,7 +9,9 @@ does), a bare command line gets none. Without a `/Fix` switch the DLL changes no
 The **hardening** fixes (the last seven in the table) guard against crashes on unusual or modded data; the shipped game
 reaches none of them. As in the port they form a group: `/Fix Hardening` turns on all of them (each still has its own
 switch), and the Fixes page shows a three-state "Hardening" box below the other fixes, with a button that shows its
-fixes one by one in their place; the window writes `/Fix Hardening` when all are ticked.
+fixes one by one in their place; the window writes `/Fix Hardening` when all are ticked. Both the fixes and the
+hardening fixes sit in a scrolling list (the wheel, the scroll bar, a box reached with Tab scrolls into view), two per
+row, sorted by their label; the table below keeps the order of `fixes.h`.
 
 The fixes follow the port (zax-redone, its `[Fix]` switches; the bugs, their addresses and evidence are in its
 `docs/ORIGINAL_BUGS.md`, cited below as "OB"). The port reimplements the code; the launcher can only change a few bytes
@@ -153,3 +155,8 @@ all 29 again (A `-065620-9f7a`, B `-065715-6506`), no switch `-065715-910c`. Wit
 The start window (platform B): the Fixes page as in the README's picture, `/Fix Hardening` on the shortcut target when all
 seven are ticked; "Show them" shows the seven in place of the fixes, a click on the Hardening box unticks all seven (the
 target loses `/Fix Hardening`), "Back to the fixes" returns (`-065501-744c`).
+The scrolling lists (platform B): the fixes sorted by label, every label whole, a click on a box changes the shortcut
+target, the hardening list behind "Show them" and back (`-115303-cba4`); a test build with shorter lists (not
+committed): the wheel to the end and back, Tab and Shift+Tab scroll the focused box into view (`-115302-c0ec`,
+`-115833-dc0e`); a start from the window with six fixes ticked: six times "enabled", the game reaches the map
+(`-115302-81d8`).

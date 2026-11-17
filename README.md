@@ -22,7 +22,7 @@ Zax-Launcher.exe, a launcher for the original Zax.exe of "Zax: The Alien Hunter"
 
 ![The Fixes page: one box per fix of the original's bugs](docs/images/launcher-fixes.png)
 
-*The Fixes page: the fixes of the original's bugs (`/Fix Name`, [docs/FIXES.md](docs/FIXES.md)).*
+*The Fixes page: the fixes of the original's bugs (`/Fix Name`, [docs/FIXES.md](docs/FIXES.md)) in a scrolling list, sorted by label; the hardening fixes in a list of their own behind "Show them".*
 
 ![The game menu (Esc) with the "Load Map" button](docs/images/launcher-game-menu.png)
 

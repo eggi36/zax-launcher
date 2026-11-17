@@ -476,6 +476,7 @@ enum {
     ID_SINGLE, ID_HOST, ID_JOIN, ID_NAME, ID_ADDRESS,
     ID_PACKS = 300, ID_PACKS_ALL, ID_PACKS_NOTE,
     ID_HARDENING = 390, ID_HARDENING_LIST,   /* the hardening group's box and the button that shows its fixes */
+    ID_FIX_LIST, ID_HARD_LIST,               /* the scrolling lists that hold the fixes' boxes */
     ID_FIX = 400   /* ID_FIX + i: the box of FIX[i] (fixes.h) */
 };
 static const char *const LAN_MODE[] = {"Off", "Host", "Join"};
@@ -522,7 +523,23 @@ static char g_zip[MAX_PATH + 16];  /* Data.zip or Data.dat, empty without */
 static int g_pool_used, g_map_count;
 static char g_args[4096];
 
-static HWND item(int id) { return GetDlgItem(g_wnd, id); }
+/* The Fixes page's scrolling lists, the fixes' and the hardening fixes' (two per row, sorted by label): the boxes are
+ * their children, so item() looks there too */
+enum { LIST_FIX, LIST_HARD, LISTS };
+static struct {
+    HWND wnd;
+    int scroll, rows;
+} g_lists[LISTS];
+static HWND g_build_parent;   /* where add() puts a control: the window (NULL), or one of the lists */
+
+static HWND item(int id)
+{
+    HWND c = GetDlgItem(g_wnd, id);
+    for (int l = 0; !c && l < LISTS; l++)
+        if (g_lists[l].wnd)
+            c = GetDlgItem(g_lists[l].wnd, id);
+    return c;
+}
 
 static void *read_file(const char *path, DWORD *size)
 {
@@ -943,26 +960,125 @@ static void save_fixes(void)
         WritePrivateProfileStringA("Fixes", FIX[i].name, checked(ID_FIX + i) ? "1" : "0", g_ini);
 }
 
-/* Built on its own page: the fixes in two columns, below them the Hardening box and the button that shows the
- * hardening fixes in the fixes' place (two columns too); each box ticked as remembered or by its default */
+/* A list: a child window with a vertical scroll bar, its boxes two per row (LIST_ROW pixels); the wheel and the bar
+ * move them, a box's clicks go on to the window (wnd_proc) as if it were the window's own */
+enum { LIST_ROW = 20 };
+
+static int list_of(HWND wnd)
+{
+    for (int l = 0; l < LISTS; l++)
+        if (g_lists[l].wnd == wnd)
+            return l;
+    return 0;
+}
+
+static void list_scroll_to(HWND list, int pos)
+{
+    const int l = list_of(list);
+    RECT r;
+    GetClientRect(list, &r);
+    const int page = r.bottom / LIST_ROW, max = g_lists[l].rows - page > 0 ? g_lists[l].rows - page : 0;
+    pos = pos < 0 ? 0 : pos > max ? max : pos;
+    if (pos != g_lists[l].scroll) {
+        ScrollWindowEx(list, 0, (g_lists[l].scroll - pos) * LIST_ROW, NULL, NULL, NULL, NULL,
+                       SW_SCROLLCHILDREN | SW_INVALIDATE | SW_ERASE);
+        g_lists[l].scroll = pos;
+    }
+    SCROLLINFO si = {sizeof si, SIF_RANGE | SIF_PAGE | SIF_POS, 0, g_lists[l].rows - 1, (UINT)page, pos, 0};
+    SetScrollInfo(list, SB_VERT, &si, TRUE);
+}
+
+static LRESULT CALLBACK list_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    const int l = list_of(wnd);
+    switch (msg) {
+    case WM_COMMAND:
+        /* a box that takes the focus (the Tab key; BS_NOTIFY) or is clicked scrolls into view */
+        if (HIWORD(wp) == BN_SETFOCUS || HIWORD(wp) == BN_CLICKED) {
+            RECT b, r;
+            GetWindowRect((HWND)lp, &b);
+            MapWindowPoints(NULL, wnd, (POINT *)&b, 2);
+            GetClientRect(wnd, &r);
+            if (b.top < 0)
+                list_scroll_to(wnd, g_lists[l].scroll + (b.top - LIST_ROW + 1) / LIST_ROW);
+            else if (b.bottom > r.bottom)
+                list_scroll_to(wnd, g_lists[l].scroll + (b.bottom - r.bottom + LIST_ROW - 1) / LIST_ROW);
+        }
+        return SendMessageA(g_wnd, msg, wp, lp);
+    case WM_VSCROLL: {
+        SCROLLINFO si = {sizeof si, SIF_ALL, 0, 0, 0, 0, 0};
+        GetScrollInfo(wnd, SB_VERT, &si);
+        int pos = g_lists[l].scroll;
+        switch (LOWORD(wp)) {
+        case SB_LINEUP: pos--; break;
+        case SB_LINEDOWN: pos++; break;
+        case SB_PAGEUP: pos -= (int)si.nPage; break;
+        case SB_PAGEDOWN: pos += (int)si.nPage; break;
+        case SB_THUMBTRACK:
+        case SB_THUMBPOSITION: pos = si.nTrackPos; break;
+        case SB_TOP: pos = 0; break;
+        case SB_BOTTOM: pos = g_lists[l].rows; break;
+        }
+        list_scroll_to(wnd, pos);
+        return 0;
+    }
+    case WM_MOUSEWHEEL:   /* a box passes the wheel on to its parent (DefWindowProc) */
+        list_scroll_to(wnd, g_lists[l].scroll - (short)HIWORD(wp) / WHEEL_DELTA * 3);
+        return 0;
+    }
+    return DefWindowProcA(wnd, msg, wp, lp);
+}
+
+/* List l at x, y (w x h) with the boxes of FIX[first] to FIX[last - 1], sorted by label (case ignored; fixes.h keeps
+ * its own order) and filled row by row, two per row in columns of 262 pixels; each ticked as remembered in the ini
+ * or by its default */
+static void add_list(int l, int x, int y, int w, int h, int id, int first, int last)
+{
+    WNDCLASSA lc;
+    memset(&lc, 0, sizeof lc);
+    lc.lpfnWndProc = list_proc;
+    lc.hInstance = GetModuleHandleA(NULL);
+    lc.hCursor = LoadCursorA(NULL, (LPCSTR)IDC_ARROW);
+    lc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+    lc.lpszClassName = "Zax-Launcher-List";
+    RegisterClassA(&lc);  /* fails harmlessly on a second call */
+    g_lists[l].wnd = add(WS_EX_CLIENTEDGE | WS_EX_CONTROLPARENT, lc.lpszClassName, "", WS_VSCROLL | WS_CLIPCHILDREN,
+                         x, y, w, h, id);
+    int order[FIXES], n = 0;
+    for (int i = first; i < last; i++) {
+        int k = n++;   /* insertion by label */
+        for (; k > 0 && lstrcmpiA(FIX[order[k - 1]].label, FIX[i].label) > 0; k--)
+            order[k] = order[k - 1];
+        order[k] = i;
+    }
+    g_build_parent = g_lists[l].wnd;
+    for (int k = 0; k < n; k++) {
+        const int i = order[k];
+        HWND box = add(0, "BUTTON", FIX[i].label, WS_TABSTOP | BS_AUTOCHECKBOX | BS_NOTIFY, 8 + (k % 2) * 268,
+                       2 + k / 2 * LIST_ROW, 262, 18, ID_FIX + i);
+        const int on = (int)GetPrivateProfileIntA("Fixes", FIX[i].name, FIX[i].on_in_window, g_ini);
+        SendMessageA(box, BM_SETCHECK, on ? BST_CHECKED : BST_UNCHECKED, 0);
+    }
+    g_build_parent = NULL;
+    g_lists[l].rows = (n + 1) / 2;
+    g_lists[l].scroll = 0;
+    list_scroll_to(g_lists[l].wnd, 0);
+}
+
+/* Built on its own page: the fixes in a scrolling list, below it the Hardening box and the button that shows the
+ * hardening fixes (in a list of their own) in the fixes' place */
 static void create_fixes_page(void)
 {
     g_build_page = PAGE_FIXES;
     add(0, "STATIC", "Fixes of bugs of the original game, made in the running Zax.exe (/Fix). Unticked: as the "
                      "original.", 0, 20, 40, 556, 16, -1);
-    const int own_rows = (FIX_FIRST_HARDENING + 1) / 2, hard_rows = (FIXES - FIX_FIRST_HARDENING + 1) / 2;
-    for (int i = 0; i < FIXES; i++) {
-        const int hard = i >= FIX_FIRST_HARDENING, k = hard ? i - FIX_FIRST_HARDENING : i, rows = hard ? hard_rows : own_rows;
-        g_build_page = hard ? PAGE_FIXES_HARDENING : PAGE_FIXES_OWN;
-        HWND box = add(0, "BUTTON", FIX[i].label, WS_TABSTOP | BS_AUTOCHECKBOX, 20 + 282 * (k / rows), 60 + 20 * (k % rows),
-                       276, 18, ID_FIX + i);
-        const int on = (int)GetPrivateProfileIntA("Fixes", FIX[i].name, FIX[i].on_in_window, g_ini);
-        SendMessageA(box, BM_SETCHECK, on ? BST_CHECKED : BST_UNCHECKED, 0);
-    }
+    g_build_page = PAGE_FIXES_OWN;
+    add_list(LIST_FIX, 20, 60, 556, 224, ID_FIX_LIST, 0, FIX_FIRST_HARDENING);
     g_build_page = PAGE_FIXES_HARDENING;
     add(0, "STATIC", "These guard against crashes on unusual or modded data; the shipped game reaches none of them. "
                      "Each one also has its own switch (/Fix Name); the box below ticks or unticks them all.",
-        0, 20, 64 + 20 * hard_rows, 556, 32, -1);
+        0, 20, 60, 556, 32, -1);
+    add_list(LIST_HARD, 20, 96, 556, 188, ID_HARD_LIST, FIX_FIRST_HARDENING, FIXES);
     g_build_page = PAGE_FIXES;
     add(0, "BUTTON", HARDENING_LABEL, WS_TABSTOP | BS_3STATE, 20, 292, 400, 20, ID_HARDENING);
     add(0, "BUTTON", "Show them", WS_TABSTOP, 452, 290, 124, 24, ID_HARDENING_LIST);
@@ -976,8 +1092,8 @@ static void add_fix_tooltips(HWND tip)
         memset(&ti, 0, sizeof ti);
         ti.cbSize = TTTOOLINFOA_V2_SIZE;
         ti.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
-        ti.hwnd = g_wnd;
         ti.uId = (UINT_PTR)item(ID_FIX + i);
+        ti.hwnd = GetParent((HWND)ti.uId);   /* its list */
         ti.lpszText = (LPSTR)FIX[i].tip;
         SendMessageA(tip, TTM_ADDTOOLA, 0, (LPARAM)&ti);
     }
@@ -1140,10 +1256,11 @@ static void fill_modes(void)
 
 static HWND add(DWORD ex, const char *cls, const char *text, DWORD style, int x, int y, int w, int h, int id)
 {
-    HWND c = CreateWindowExA(ex, cls, text, WS_CHILD | WS_VISIBLE | style, x, y, w, h, g_wnd,
+    HWND c = CreateWindowExA(ex, cls, text, WS_CHILD | WS_VISIBLE | style, x, y, w, h, g_build_parent ? g_build_parent : g_wnd,
                              (HMENU)(INT_PTR)id, GetModuleHandleA(NULL), NULL);
     SendMessageA(c, WM_SETFONT, (WPARAM)GetStockObject(DEFAULT_GUI_FONT), 0);
-    if (g_control_count < (int)(sizeof g_controls / sizeof *g_controls)) {
+    /* a box in a list is shown and hidden with the list */
+    if (!g_build_parent && g_control_count < (int)(sizeof g_controls / sizeof *g_controls)) {
         g_controls[g_control_count].wnd = c;
         g_controls[g_control_count++].page = g_build_page;
     }
